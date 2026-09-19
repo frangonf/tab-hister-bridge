@@ -6,19 +6,44 @@
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      margin: 2rem;
-      max-width: 540px;
+      margin: 1rem;
+      min-width: 380px;
+      max-width: 480px;
       color: #24292f;
       background: #f6f8fa;
     }
     .card {
       background: #ffffff;
       border: 1px solid #d0d7de;
-      border-radius: 6px;
-      padding: 1.5rem;
+      border-radius: 8px;
+      padding: 1.25rem;
       box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
-    h2 { margin-top: 0; font-size: 1.25rem; }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1.25rem;
+      border-bottom: 1px solid #e1e4e8;
+      padding-bottom: 0.75rem;
+    }
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .header h2 {
+      margin: 0;
+      font-size: 1.05rem;
+      font-weight: 600;
+    }
+    .open-link {
+      font-size: 0.8rem;
+      color: #0969da;
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .open-link:hover { text-decoration: underline; }
     .field { margin-bottom: 1rem; }
     label { display: block; font-weight: 600; font-size: 0.875rem; margin-bottom: 0.25rem; }
     input[type="text"], input[type="password"], input[type="number"] {
@@ -48,7 +73,13 @@
 </head>
 <body>
   <div class="card">
-    <h2>Tab Stash ↔ Hister Settings</h2>
+    <div class="header">
+      <div class="header-left">
+        <img src="../icons/icon-32.png" width="22" height="22" alt="Logo" style="border-radius: 4px;" />
+        <h2>Tab Stash ↔ Hister</h2>
+      </div>
+      <a class="open-link" href="http://127.0.0.1:4433" target="_blank">Search Hister ↗</a>
+    </div>
     <div class="field">
       <label for="histerUrl">Hister Server URL</label>
       <input type="text" id="histerUrl" placeholder="http://127.0.0.1:4433" />
