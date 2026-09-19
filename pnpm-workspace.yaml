@@ -1,3 +1,16 @@
 allowBuilds:
   esbuild: true
   spawn-sync: true
+overrides:
+  '@vitest/mocker@>=2.1.0 <4.1.11': ^4.1.11
+  adm-zip@<0.6.0: ^0.6.0
+  adm-zip@<0.6.1: ^0.6.1
+  adm-zip@>=0.5.9 <=0.6.0: ^0.6.1
+  ajv@>=7.0.0-alpha.0 <8.18.0: ^8.18.0
+  esbuild@>=0.27.3 <0.28.1: ^0.28.1
+  image-size@<=2.0.2: ^2.0.3
+  shell-quote@<=1.8.4: ^1.9.0
+  shell-quote@>=1.1.0 <=1.8.3: ^1.8.4
+  tmp@<0.2.6: ^0.2.6
+  uuid@<11.1.1: ^11.1.1
+  vitest@>=2.1.0 <4.1.11: ^4.1.11

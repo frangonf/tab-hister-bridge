@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { computeStashLabel } from "../src/bridge-core";
 import { DEFAULT_CONFIG, type HisterAddRequest } from "../src/types";
 
 describe("Tab-Hister Bridge Core Logic", () => {
@@ -9,13 +10,10 @@ describe("Tab-Hister Bridge Core Logic", () => {
   });
 
   it("constructs clean hierarchical tag from Tab Stash folders", () => {
-    const folderPath = ["Engineering", "Distributed Systems"];
-    const tagPrefix = "stash";
-    const segments = folderPath
-      .map((s) => s.toLowerCase().replace(/[^\w-]/g, "-"))
-      .filter(Boolean);
-
-    const label = `${tagPrefix}/${segments.join("/")}`;
+    const label = computeStashLabel(
+      ["Engineering", "Distributed Systems"],
+      "stash"
+    );
 
     const payload: HisterAddRequest = {
       url: "https://raft.github.io",

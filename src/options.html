@@ -2,13 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Tab Stash - Hister Bridge Settings</title>
+  <title>Tab Stash ↔ Hister Bridge</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       margin: 1rem;
-      min-width: 380px;
-      max-width: 480px;
+      min-width: 400px;
+      max-width: 500px;
       color: #24292f;
       background: #f6f8fa;
     }
@@ -18,12 +18,13 @@
       border-radius: 8px;
       padding: 1.25rem;
       box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      margin-bottom: 1rem;
     }
     .header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 1.25rem;
+      margin-bottom: 1rem;
       border-bottom: 1px solid #e1e4e8;
       padding-bottom: 0.75rem;
     }
@@ -37,38 +38,106 @@
       font-size: 1.05rem;
       font-weight: 600;
     }
-    .open-link {
+    .badge {
+      font-size: 0.7rem;
+      background: #ddf4ff;
+      color: #0969da;
+      padding: 2px 6px;
+      border-radius: 10px;
+      font-weight: 600;
+    }
+    .section-title {
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin: 0 0 0.5rem 0;
+      color: #24292f;
+    }
+    .section-desc {
+      font-size: 0.8rem;
+      color: #57606a;
+      margin-top: 0;
+      margin-bottom: 0.75rem;
+      line-height: 1.4;
+    }
+    .field { margin-bottom: 0.85rem; }
+    label { display: block; font-weight: 600; font-size: 0.825rem; margin-bottom: 0.25rem; }
+    input[type="text"], input[type="password"] {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 0.45rem 0.6rem;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      font-size: 0.85rem;
+    }
+    input[type="text"]:focus, input[type="password"]:focus {
+      outline: none;
+      border-color: #0969da;
+      box-shadow: 0 0 0 3px rgba(9,105,218,0.15);
+    }
+    .checkbox-field { display: flex; align-items: center; gap: 0.5rem; font-size: 0.825rem; }
+    .btn-row {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      margin-top: 0.75rem;
+    }
+    button {
+      border: 1px solid rgba(27,31,36,0.15);
+      padding: 0.45rem 0.9rem;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 0.825rem;
+      transition: background 0.15s;
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .btn-primary {
+      background: #0969da;
+      color: #fff;
+    }
+    .btn-primary:hover:not(:disabled) { background: #085cc0; }
+    .btn-action {
+      background: #2da44e;
+      color: #fff;
+    }
+    .btn-action:hover:not(:disabled) { background: #2c974b; }
+    .status {
+      margin-top: 0.5rem;
+      font-size: 0.8rem;
+      min-height: 1.1rem;
+    }
+    .status.success { color: #1a7f37; }
+    .status.error { color: #cf222e; }
+    .backfill-box {
+      background: #f6f8fa;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      padding: 0.6rem;
+      font-size: 0.8rem;
+      color: #24292f;
+      min-height: 1.2rem;
+      word-break: break-word;
+    }
+    .quick-links {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      margin-top: 0.75rem;
+      padding-top: 0.75rem;
+      border-top: 1px dashed #d0d7de;
+    }
+    .quick-link {
       font-size: 0.8rem;
       color: #0969da;
       text-decoration: none;
-      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
     }
-    .open-link:hover { text-decoration: underline; }
-    .field { margin-bottom: 1rem; }
-    label { display: block; font-weight: 600; font-size: 0.875rem; margin-bottom: 0.25rem; }
-    input[type="text"], input[type="password"], input[type="number"] {
-      width: 100%;
-      box-sizing: border-box;
-      padding: 0.5rem;
-      border: 1px solid #d0d7de;
-      border-radius: 4px;
-      font-size: 0.875rem;
-    }
-    .checkbox-field { display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; }
-    button {
-      background: #0969da;
-      color: #fff;
-      border: none;
-      padding: 0.5rem 1rem;
-      border-radius: 4px;
-      font-weight: 600;
-      cursor: pointer;
-      font-size: 0.875rem;
-    }
-    button:hover { background: #085cc0; }
-    .status { margin-top: 0.75rem; font-size: 0.875rem; min-height: 1.2rem; }
-    .success { color: #1a7f37; }
-    .error { color: #cf222e; }
+    .quick-link:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
@@ -78,8 +147,10 @@
         <img src="../icons/icon-32.png" width="22" height="22" alt="Logo" style="border-radius: 4px;" />
         <h2>Tab Stash ↔ Hister</h2>
       </div>
-      <a class="open-link" href="http://127.0.0.1:4433" target="_blank">Search Hister ↗</a>
+      <span class="badge">Defuddle Inside</span>
     </div>
+
+    <!-- Connection & Config -->
     <div class="field">
       <label for="histerUrl">Hister Server URL</label>
       <input type="text" id="histerUrl" placeholder="http://127.0.0.1:4433" />
@@ -96,9 +167,37 @@
       <input type="checkbox" id="syncMobile" />
       <label for="syncMobile" style="margin:0; font-weight:normal;">Poll & sync mobile stashes from Hister</label>
     </div>
-    <button id="saveBtn">Save & Test Connection</button>
+    <div class="btn-row">
+      <button id="saveBtn" class="btn-primary">Save Settings</button>
+    </div>
     <div id="status" class="status"></div>
   </div>
+
+  <!-- Pipeline & Backfill -->
+  <div class="card">
+    <h3 class="section-title">Knowledge Pipeline & Backfill</h3>
+    <p class="section-desc">
+      Extract clean HTML and plain text with Defuddle for all stashed tabs, then backfill missing or outdated Hister entries.
+    </p>
+
+    <div class="btn-row">
+      <button id="backfillBtn" class="btn-action">Sync & Backfill Stashes</button>
+    </div>
+    <div style="margin-top: 0.6rem;">
+      <div id="backfillStatus" class="backfill-box">Ready. Click above to scan and sync stashed bookmarks.</div>
+    </div>
+
+    <!-- Quick Navigation -->
+    <div class="quick-links">
+      <a id="searchStashesLink" class="quick-link" href="http://127.0.0.1:4433/?q=label:stash/*" target="_blank">
+        🔍 Search all stashed tabs in Hister (label:stash/*) ↗
+      </a>
+      <a id="openHisterLink" class="quick-link" href="http://127.0.0.1:4433" target="_blank">
+        🌐 Open Hister Dashboard ↗
+      </a>
+    </div>
+  </div>
+
   <script type="module" src="../dist/options.js"></script>
 </body>
 </html>
