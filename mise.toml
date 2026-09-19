@@ -1,6 +1,17 @@
+min_version = "2026.5.15"
+
+[settings]
+experimental = true
+lockfile = true
+minimum_release_age = "7d"
+
 [tools]
 node = "26"
 pnpm = "12"
+dagger = "0.21.9"
+actionlint = "1.7.12"
+shellcheck = "0.11.0"
+"github:zizmorcore/zizmor" = "v1.30.1"
 
 [env]
 PATH = "{{config_root}}/bin:$PATH"
@@ -92,3 +103,19 @@ echo "1. Hister running at: http://localhost:4433"
 echo "2. Bridge bundled in ./dist"
 echo "To launch Firefox with the bridge: mise run dev:firefox"
 """
+
+[tasks."ci:dagger"]
+description = "Run the same containerized checks used by GitHub Actions"
+run = "mise exec -- dagger call -m ci check --source=."
+
+[tasks."ci:package"]
+description = "Build the extension zip with web-ext inside Dagger"
+run = "mise exec -- dagger call -m ci package --source=. export --path=web-ext-artifacts/tab-hister-bridge.zip"
+
+[tasks."actions:lint"]
+description = "Lint GitHub Actions workflows"
+run = "actionlint .github/workflows/*.yml"
+
+[tasks."actions:audit"]
+description = "Audit GitHub Actions workflows with strict zizmor settings"
+run = "zizmor --pedantic --no-ignores .github/workflows"
