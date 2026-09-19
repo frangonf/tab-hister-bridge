@@ -1,0 +1,10 @@
+dist
+node_modules
+pnpm-lock.yaml
+dev-profile
+dev-data
+web-ext-artifacts
+.mise
+ci/sdk
+ci/dagger.gen.ts
+ci/pnpm-lock.yaml

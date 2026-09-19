@@ -10,7 +10,11 @@ describe("startBackgroundJob", () => {
     const job = vi.fn(() => pending);
     const onError = vi.fn();
 
-    const acknowledgement = startBackgroundJob(job, { inProgress: true }, onError);
+    const acknowledgement = startBackgroundJob(
+      job,
+      { inProgress: true },
+      onError,
+    );
 
     expect(acknowledgement).toEqual({ inProgress: true });
     expect(job).toHaveBeenCalledOnce();
@@ -23,13 +27,7 @@ describe("startBackgroundJob", () => {
     const error = new Error("failed");
     const onError = vi.fn();
 
-    startBackgroundJob(
-      async () => {
-        throw error;
-      },
-      undefined,
-      onError,
-    );
+    startBackgroundJob(() => Promise.reject(error), undefined, onError);
     await Promise.resolve();
     await Promise.resolve();
 

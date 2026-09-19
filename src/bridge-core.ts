@@ -54,20 +54,29 @@ export function sanitizeLabel(text: string): string {
     .normalize("NFC");
 }
 
-export function computeStashLabel(folderPath: string[], tagPrefix: string): string {
+export function computeStashLabel(
+  folderPath: string[],
+  tagPrefix: string,
+): string {
   const segments = folderPath
     .map(sanitizeLabel)
     .filter((segment) => segment && segment !== "tab-stash");
   return segments.length > 0 ? `${tagPrefix}/${segments.join("/")}` : tagPrefix;
 }
 
-export function shouldUpdateLabel(currentLabel: string, targetLabel: string): boolean {
+export function shouldUpdateLabel(
+  currentLabel: string,
+  targetLabel: string,
+): boolean {
   return currentLabel !== targetLabel;
 }
 
 export type StashMoveAction = "none" | "apply" | "restore";
 
-export function classifyStashMove(wasInside: boolean, isInside: boolean): StashMoveAction {
+export function classifyStashMove(
+  wasInside: boolean,
+  isInside: boolean,
+): StashMoveAction {
   if (isInside) return "apply";
   return wasInside ? "restore" : "none";
 }
@@ -121,7 +130,9 @@ export function computeStashChanges(
   previous: ReadonlyMap<string, StashBookmark>,
   current: ReadonlyMap<string, StashBookmark>,
 ): { removed: StashBookmark[]; changed: StashBookmark[] } {
-  const removed = Array.from(previous.values()).filter((item) => !current.has(item.id));
+  const removed = Array.from(previous.values()).filter(
+    (item) => !current.has(item.id),
+  );
   const changed = Array.from(current.values()).filter((item) => {
     const old = previous.get(item.id);
     return (
@@ -141,17 +152,21 @@ export interface StashRootCandidate {
   dateAdded?: number;
 }
 
-export function selectTabStashRoot<T extends StashRootCandidate>(candidates: T[]): T | null {
-  const exact = candidates.filter((candidate) => candidate.title === "Tab Stash");
+export function selectTabStashRoot<T extends StashRootCandidate>(
+  candidates: T[],
+): T | null {
+  const exact = candidates.filter(
+    (candidate) => candidate.title === "Tab Stash",
+  );
   if (exact.length === 0) return null;
 
   const minimumDepth = Math.min(...exact.map((candidate) => candidate.depth));
   return (
     [...exact]
-    .filter((candidate) => candidate.depth === minimumDepth)
-    .sort((a, b) => {
-      const byDate = (a.dateAdded ?? 0) - (b.dateAdded ?? 0);
-      return byDate || a.id.localeCompare(b.id);
+      .filter((candidate) => candidate.depth === minimumDepth)
+      .sort((a, b) => {
+        const byDate = (a.dateAdded ?? 0) - (b.dateAdded ?? 0);
+        return byDate || a.id.localeCompare(b.id);
       })[0] ?? null
   );
 }
@@ -206,7 +221,8 @@ export function normalizeUrl(rawUrl: string): string {
     // Hister's normalizeWebURL (for example, host casing and default ports).
     new URL(rawUrl);
     const hashIndex = rawUrl.indexOf("#");
-    const withoutFragment = hashIndex >= 0 ? rawUrl.slice(0, hashIndex) : rawUrl;
+    const withoutFragment =
+      hashIndex >= 0 ? rawUrl.slice(0, hashIndex) : rawUrl;
     const queryIndex = withoutFragment.indexOf("?");
     if (queryIndex < 0) return withoutFragment;
 
@@ -230,7 +246,8 @@ export function normalizeUrl(rawUrl: string): string {
       encodeURIComponent(value)
         .replace(
           /[!'()*]/g,
-          (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+          (character) =>
+            `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
         )
         .replace(/%20/g, "+");
     const query = Array.from(params.entries())

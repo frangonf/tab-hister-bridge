@@ -22,7 +22,10 @@ async function fileIdentity(path: string): Promise<FileIdentity | null> {
   }
 }
 
-function sameFileIdentity(before: FileIdentity | null, after: FileIdentity | null): boolean {
+function sameFileIdentity(
+  before: FileIdentity | null,
+  after: FileIdentity | null,
+): boolean {
   return (
     before?.size === after?.size &&
     before?.mtimeNs === after?.mtimeNs &&
@@ -30,14 +33,18 @@ function sameFileIdentity(before: FileIdentity | null, after: FileIdentity | nul
   );
 }
 
-async function copyStableWalSnapshot(sourcePath: string, snapshotPath: string): Promise<void> {
+async function copyStableWalSnapshot(
+  sourcePath: string,
+  snapshotPath: string,
+): Promise<void> {
   const sourceWal = `${sourcePath}-wal`;
   const snapshotWal = `${snapshotPath}-wal`;
 
   for (let attempt = 0; attempt < 8; attempt++) {
     const databaseBefore = await fileIdentity(sourcePath);
     const walBefore = await fileIdentity(sourceWal);
-    if (!databaseBefore) throw new Error(`SQLite database not found: ${sourcePath}`);
+    if (!databaseBefore)
+      throw new Error(`SQLite database not found: ${sourcePath}`);
 
     await rm(snapshotPath, { force: true });
     await rm(snapshotWal, { force: true });
@@ -50,12 +57,14 @@ async function copyStableWalSnapshot(sourcePath: string, snapshotPath: string): 
       fileIdentity(sourcePath),
       fileIdentity(sourceWal),
     ]);
-    if (sameFileIdentity(databaseBefore, databaseAfter) && sameFileIdentity(walBefore, walAfter)) {
+    if (
+      sameFileIdentity(databaseBefore, databaseAfter) &&
+      sameFileIdentity(walBefore, walAfter)
+    ) {
       const snapshot = new DatabaseSync(snapshotPath);
       try {
         const check = snapshot.prepare("PRAGMA quick_check").get() as
-          | { quick_check?: string }
-          | undefined;
+          { quick_check?: string } | undefined;
         if (check?.quick_check !== "ok") {
           throw new Error("SQLite snapshot failed its integrity check");
         }
@@ -66,7 +75,9 @@ async function copyStableWalSnapshot(sourcePath: string, snapshotPath: string): 
     }
   }
 
-  throw new Error("places.sqlite changed continuously while creating its snapshot");
+  throw new Error(
+    "places.sqlite changed continuously while creating its snapshot",
+  );
 }
 
 export async function backupSqliteDatabase(

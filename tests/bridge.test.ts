@@ -12,7 +12,7 @@ describe("Tab-Hister Bridge Core Logic", () => {
   it("constructs clean hierarchical tag from Tab Stash folders", () => {
     const label = computeStashLabel(
       ["Engineering", "Distributed Systems"],
-      "stash"
+      "stash",
     );
 
     const payload: HisterAddRequest = {

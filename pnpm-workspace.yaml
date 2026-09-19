@@ -2,7 +2,7 @@ allowBuilds:
   esbuild: true
   spawn-sync: true
 overrides:
-  '@vitest/mocker@>=2.1.0 <4.1.11': ^4.1.11
+  "@vitest/mocker@>=2.1.0 <4.1.11": ^4.1.11
   adm-zip@<0.6.0: ^0.6.0
   adm-zip@<0.6.1: ^0.6.1
   adm-zip@>=0.5.9 <=0.6.0: ^0.6.1

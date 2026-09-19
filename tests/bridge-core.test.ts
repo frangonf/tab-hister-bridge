@@ -35,22 +35,35 @@ describe("shouldSubmitFetchedContent", () => {
 
 describe("classifyFetchedContent", () => {
   it("routes PDFs separately and rejects unsupported binary responses", () => {
-    expect(classifyFetchedContent("https://example.com/report", "application/pdf")).toBe("pdf");
     expect(
-      classifyFetchedContent("https://example.com/report.PDF", "application/octet-stream"),
+      classifyFetchedContent("https://example.com/report", "application/pdf"),
     ).toBe("pdf");
-    expect(classifyFetchedContent("https://example.com/archive.zip", "application/zip")).toBe(
-      "unsupported",
-    );
-    expect(classifyFetchedContent("https://example.com/page", "text/html; charset=utf-8")).toBe(
-      "html",
-    );
+    expect(
+      classifyFetchedContent(
+        "https://example.com/report.PDF",
+        "application/octet-stream",
+      ),
+    ).toBe("pdf");
+    expect(
+      classifyFetchedContent(
+        "https://example.com/archive.zip",
+        "application/zip",
+      ),
+    ).toBe("unsupported");
+    expect(
+      classifyFetchedContent(
+        "https://example.com/page",
+        "text/html; charset=utf-8",
+      ),
+    ).toBe("html");
   });
 });
 
 describe("sanitizeLabel", () => {
   it("preserves international letters and normalizes Latin diacritics", () => {
-    expect(sanitizeLabel("Diseño y 開発 Продукт")).toBe("diseno-y-開発-продукт");
+    expect(sanitizeLabel("Diseño y 開発 Продукт")).toBe(
+      "diseno-y-開発-продукт",
+    );
     expect(computeStashLabel(["開発"], "stash")).toBe("stash/開発");
     expect(sanitizeLabel("विकास")).toBe("विकास");
   });
@@ -68,7 +81,9 @@ describe("isSupportedPageUrl", () => {
 describe("normalizeUrl", () => {
   it("removes fragments and Hister tracking parameters while retaining other parameters", () => {
     expect(
-      normalizeUrl("https://Example.com/page?utm_source=newsletter&keep=1&utm=legacy#section"),
+      normalizeUrl(
+        "https://Example.com/page?utm_source=newsletter&keep=1&utm=legacy#section",
+      ),
     ).toBe("https://Example.com/page?keep=1");
   });
 
@@ -96,7 +111,10 @@ describe("selectTabStashRoot", () => {
 describe("updateStashSnapshot", () => {
   it("updates individual bookmarks without rebuilding the full tree", () => {
     const initial = new Map([
-      ["a", { id: "a", url: "https://a.test", title: "A", folderPath: ["Old"] }],
+      [
+        "a",
+        { id: "a", url: "https://a.test", title: "A", folderPath: ["Old"] },
+      ],
     ]);
     const counts = buildStashUrlCounts(initial);
     const updated = updateStashSnapshot(
@@ -125,7 +143,10 @@ describe("updateStashSnapshot", () => {
 describe("computeStashChanges", () => {
   it("returns deleted descendants from the previous tree snapshot", () => {
     const previous = new Map([
-      ["a", { id: "a", url: "https://a.test", title: "A", folderPath: ["Group"] }],
+      [
+        "a",
+        { id: "a", url: "https://a.test", title: "A", folderPath: ["Group"] },
+      ],
       [
         "b",
         {
@@ -144,13 +165,21 @@ describe("computeStashChanges", () => {
 
   it("detects a folder-path change for an existing bookmark", () => {
     const previous = new Map([
-      ["a", { id: "a", url: "https://a.test", title: "A", folderPath: ["Old"] }],
+      [
+        "a",
+        { id: "a", url: "https://a.test", title: "A", folderPath: ["Old"] },
+      ],
     ]);
     const current = new Map([
-      ["a", { id: "a", url: "https://a.test", title: "A", folderPath: ["New"] }],
+      [
+        "a",
+        { id: "a", url: "https://a.test", title: "A", folderPath: ["New"] },
+      ],
     ]);
 
-    expect(computeStashChanges(previous, current).changed).toEqual([current.get("a")]);
+    expect(computeStashChanges(previous, current).changed).toEqual([
+      current.get("a"),
+    ]);
   });
 });
 

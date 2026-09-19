@@ -1,17 +1,31 @@
 import { checkHisterConnection } from "./hister-client";
-import { DEFAULT_CONFIG, type BridgeConfig, type BackfillProgress } from "./types";
+import {
+  DEFAULT_CONFIG,
+  type BridgeConfig,
+  type BackfillProgress,
+} from "./types";
 
 const histerUrlInput = document.getElementById("histerUrl") as HTMLInputElement;
-const accessTokenInput = document.getElementById("accessToken") as HTMLInputElement;
+const accessTokenInput = document.getElementById(
+  "accessToken",
+) as HTMLInputElement;
 const tagPrefixInput = document.getElementById("tagPrefix") as HTMLInputElement;
-const syncMobileInput = document.getElementById("syncMobile") as HTMLInputElement;
+const syncMobileInput = document.getElementById(
+  "syncMobile",
+) as HTMLInputElement;
 const saveBtn = document.getElementById("saveBtn") as HTMLButtonElement;
 const statusEl = document.getElementById("status") as HTMLDivElement;
 
 const backfillBtn = document.getElementById("backfillBtn") as HTMLButtonElement;
-const backfillStatusEl = document.getElementById("backfillStatus") as HTMLDivElement;
-const searchStashesLink = document.getElementById("searchStashesLink") as HTMLAnchorElement;
-const openHisterLink = document.getElementById("openHisterLink") as HTMLAnchorElement;
+const backfillStatusEl = document.getElementById(
+  "backfillStatus",
+) as HTMLDivElement;
+const searchStashesLink = document.getElementById(
+  "searchStashesLink",
+) as HTMLAnchorElement;
+const openHisterLink = document.getElementById(
+  "openHisterLink",
+) as HTMLAnchorElement;
 
 let pollTimer: number | null = null;
 
@@ -28,8 +42,13 @@ function updateQuickLinks(histerUrl: string, tagPrefix: string): void {
 }
 
 async function loadSettings(): Promise<void> {
-  const stored = await browser.storage.local.get("bridge_config");
-  const config: BridgeConfig = { ...DEFAULT_CONFIG, ...(stored.bridge_config || {}) };
+  const stored = (await browser.storage.local.get("bridge_config")) as {
+    bridge_config?: Partial<BridgeConfig>;
+  };
+  const config: BridgeConfig = {
+    ...DEFAULT_CONFIG,
+    ...(stored.bridge_config ?? {}),
+  };
 
   histerUrlInput.value = config.histerUrl;
   accessTokenInput.value = config.accessToken;
@@ -63,7 +82,7 @@ async function saveSettings(): Promise<void> {
     const result = await checkHisterConnection(
       fetch,
       newConfig.histerUrl,
-      headers
+      headers,
     );
     await browser.storage.local.set({ bridge_config: newConfig });
     if (!result.reachable) {
@@ -72,7 +91,12 @@ async function saveSettings(): Promise<void> {
     } else if (!result.authorized) {
       statusEl.className = "status error";
       statusEl.textContent = `Hister rejected the access token (HTTP ${result.status}). Saved config.`;
-    } else if (result.status === 404 || (result.status !== undefined && result.status >= 200 && result.status < 300)) {
+    } else if (
+      result.status === 404 ||
+      (result.status !== undefined &&
+        result.status >= 200 &&
+        result.status < 300)
+    ) {
       statusEl.className = "status success";
       statusEl.textContent = "Saved! Successfully connected to Hister.";
     } else {
@@ -89,8 +113,10 @@ async function saveSettings(): Promise<void> {
 
 async function checkBackfillStatus(): Promise<void> {
   try {
-    const res = await browser.runtime.sendMessage({ action: "get_status" });
-    if (res && res.backfill) {
+    const res = (await browser.runtime.sendMessage({
+      action: "get_status",
+    })) as { backfill?: BackfillProgress } | undefined;
+    if (res?.backfill) {
       renderBackfillProgress(res.backfill);
     }
   } catch {
@@ -102,11 +128,13 @@ function renderBackfillProgress(progress: BackfillProgress): void {
   if (progress.inProgress) {
     backfillBtn.disabled = true;
     backfillBtn.textContent = "Syncing in progress...";
-    backfillStatusEl.textContent = progress.message || `Processing (${progress.processed}/${progress.total})...`;
+    backfillStatusEl.textContent =
+      progress.message ||
+      `Processing (${progress.processed}/${progress.total})...`;
 
     if (!pollTimer) {
-      pollTimer = window.setInterval(async () => {
-        await checkBackfillStatus();
+      pollTimer = window.setInterval(() => {
+        void checkBackfillStatus();
       }, 1000);
     }
   } else {
@@ -132,17 +160,27 @@ async function triggerBackfill(): Promise<void> {
   });
 
   try {
-    const res = await browser.runtime.sendMessage({ action: "start_backfill" });
-    if (res && res.progress) {
+    const res = (await browser.runtime.sendMessage({
+      action: "start_backfill",
+    })) as { progress?: BackfillProgress } | undefined;
+    if (res?.progress) {
       renderBackfillProgress(res.progress);
     }
   } catch (err) {
     backfillBtn.disabled = false;
     backfillBtn.textContent = "Sync & Backfill Stashes";
-    backfillStatusEl.textContent = `Error starting backfill: ${err}`;
+    backfillStatusEl.textContent = `Error starting backfill: ${
+      err instanceof Error ? err.message : String(err)
+    }`;
   }
 }
 
-document.addEventListener("DOMContentLoaded", loadSettings);
-saveBtn.addEventListener("click", saveSettings);
-backfillBtn.addEventListener("click", triggerBackfill);
+document.addEventListener("DOMContentLoaded", () => {
+  void loadSettings();
+});
+saveBtn.addEventListener("click", () => {
+  void saveSettings();
+});
+backfillBtn.addEventListener("click", () => {
+  void triggerBackfill();
+});
