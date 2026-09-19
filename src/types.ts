@@ -29,6 +29,7 @@ export interface HisterSearchResultItem {
 }
 
 export interface HisterSearchResponse {
+  documents?: HisterSearchResultItem[];
   results?: HisterSearchResultItem[];
   total?: number;
 }

@@ -135,8 +135,10 @@ async function syncMobileStashes(): Promise<void> {
 
   try {
     const query = encodeURIComponent(`label:${config.tagPrefix}:mobile`);
-    const endpoint = `${config.histerUrl.replace(/\/$/, "")}/api/search?q=${query}&limit=50`;
-    const headers: Record<string, string> = {};
+    const endpoint = `${config.histerUrl.replace(/\/$/, "")}/search?q=${query}&limit=50`;
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+    };
     if (config.accessToken) {
       headers["Authorization"] = `Bearer ${config.accessToken}`;
     }
@@ -145,7 +147,7 @@ async function syncMobileStashes(): Promise<void> {
     if (!res.ok) return;
 
     const data = (await res.json()) as HisterSearchResponse;
-    const items = data.results || [];
+    const items = data.documents || data.results || [];
     if (items.length === 0) return;
 
     // Ensure "Mobile Inbox" folder exists under Tab Stash root
