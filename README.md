@@ -90,12 +90,12 @@ mise run dev:firefox
 | `mise run hister:up` | Launch local Hister container at `http://127.0.0.1:4433` |
 | `mise run hister:down` | Stop local Hister container |
 | `mise run hister:logs` | Follow Hister container logs |
-| `mise run tabstash:install` | Run `npm install` inside `../tab-stash` |
+| `mise run tabstash:install` | Run `pnpm install` inside `../tab-stash` |
 | `mise run tabstash:build` | Build Tab Stash inside `../tab-stash` |
 | `mise run bridge:install` | Run `pnpm install` inside this repo |
 | `mise run bridge:build` | Compile TypeScript into `dist/` with `tsup` |
 | `mise run test` | Run Vitest unit tests |
-| `mise run dev:firefox` | Launch Firefox with both extensions loaded |
+| `mise run dev:firefox` | Launch Zen/Firefox with both extensions loaded |
 | `mise run dev` | Full local setup (`hister:up` + builds + `dev:firefox`) |
 
 ---

@@ -17,6 +17,7 @@ export const DEFAULT_CONFIG: BridgeConfig = {
 export interface HisterAddRequest {
   url: string;
   title?: string;
+  label?: string;
   labels?: string[];
 }
 
@@ -29,6 +30,7 @@ export interface HisterSearchResultItem {
 }
 
 export interface HisterSearchResponse {
+  documents?: HisterSearchResultItem[];
   results?: HisterSearchResultItem[];
   total?: number;
 }

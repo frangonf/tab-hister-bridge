@@ -28,7 +28,7 @@ run = "docker logs -f hister-dev"
 
 [tasks."tabstash:install"]
 description = "Install dependencies in ../tab-stash"
-run = "npm --prefix ../tab-stash install"
+run = "pnpm -C ../tab-stash install --no-lockfile"
 
 [tasks."tabstash:build"]
 description = "Build the Tab Stash extension in ../tab-stash"
@@ -47,14 +47,39 @@ description = "Run bridge tests with Vitest"
 run = "pnpm test"
 
 [tasks."dev:firefox"]
-description = "Launch isolated Firefox running Tab Stash and the Bridge"
+description = "Launch isolated browser running Tab Stash and the Bridge"
 depends = ["bridge:build"]
 run = """
-npx web-ext run \
+if [ -n "$FIREFOX_BINARY" ] && [ -x "$FIREFOX_BINARY" ]; then
+  BROWSER_BIN="$FIREFOX_BINARY"
+elif [ -x "/Applications/Zen.app/Contents/MacOS/zen" ]; then
+  BROWSER_BIN="/Applications/Zen.app/Contents/MacOS/zen"
+elif [ -x "/Applications/Firefox Developer Edition.app/Contents/MacOS/firefox" ]; then
+  BROWSER_BIN="/Applications/Firefox Developer Edition.app/Contents/MacOS/firefox"
+elif [ -x "/Applications/Firefox.app/Contents/MacOS/firefox" ]; then
+  BROWSER_BIN="/Applications/Firefox.app/Contents/MacOS/firefox"
+elif command -v zen >/dev/null 2>&1; then
+  BROWSER_BIN="$(command -v zen)"
+elif command -v firefox >/dev/null 2>&1; then
+  BROWSER_BIN="$(command -v firefox)"
+else
+  echo "Error: No Firefox-compatible binary found (checked Zen, Firefox, and PATH)." >&2
+  exit 1
+fi
+
+echo "Launching browser: $BROWSER_BIN"
+pnpx web-ext run \
   --source-dir . \
+  --firefox-binary "$BROWSER_BIN" \
   --firefox-profile ./dev-profile \
   --profile-create-if-missing \
   --keep-profile-changes \
+  --watch-file dist/background.js \
+  --watch-file dist/options.js \
+  --watch-file manifest.json \
+  --watch-ignored "dev-profile/**" \
+  --watch-ignored "dev-data/**" \
+  --watch-ignored "node_modules/**" \
   --start-url "about:debugging#/runtime/this-firefox"
 """
 

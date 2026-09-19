@@ -72,19 +72,19 @@ function sanitizeLabel(text: string): string {
 async function pushToHister(url: string, title: string, folderPath: string[]): Promise<boolean> {
   if (!url || !url.startsWith("http")) return false;
 
-  const labels: string[] = [config.tagPrefix];
-  for (const segment of folderPath) {
-    const clean = sanitizeLabel(segment);
-    if (clean && clean !== "tab-stash") {
-      labels.push(`${config.tagPrefix}/${clean}`);
-      labels.push(clean);
-    }
-  }
+  const segments = folderPath
+    .map(sanitizeLabel)
+    .filter((s) => s && s !== "tab-stash");
+
+  const label = segments.length > 0
+    ? `${config.tagPrefix}/${segments.join("/")}`
+    : config.tagPrefix;
 
   const payload: HisterAddRequest = {
     url,
     title: title || url,
-    labels: Array.from(new Set(labels)),
+    label,
+    labels: [label],
   };
 
   const headers: Record<string, string> = {
@@ -135,8 +135,10 @@ async function syncMobileStashes(): Promise<void> {
 
   try {
     const query = encodeURIComponent(`label:${config.tagPrefix}:mobile`);
-    const endpoint = `${config.histerUrl.replace(/\/$/, "")}/api/search?q=${query}&limit=50`;
-    const headers: Record<string, string> = {};
+    const endpoint = `${config.histerUrl.replace(/\/$/, "")}/search?q=${query}&limit=50`;
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+    };
     if (config.accessToken) {
       headers["Authorization"] = `Bearer ${config.accessToken}`;
     }
@@ -145,7 +147,7 @@ async function syncMobileStashes(): Promise<void> {
     if (!res.ok) return;
 
     const data = (await res.json()) as HisterSearchResponse;
-    const items = data.results || [];
+    const items = data.documents || data.results || [];
     if (items.length === 0) return;
 
     // Ensure "Mobile Inbox" folder exists under Tab Stash root
