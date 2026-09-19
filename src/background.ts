@@ -72,19 +72,19 @@ function sanitizeLabel(text: string): string {
 async function pushToHister(url: string, title: string, folderPath: string[]): Promise<boolean> {
   if (!url || !url.startsWith("http")) return false;
 
-  const labels: string[] = [config.tagPrefix];
-  for (const segment of folderPath) {
-    const clean = sanitizeLabel(segment);
-    if (clean && clean !== "tab-stash") {
-      labels.push(`${config.tagPrefix}/${clean}`);
-      labels.push(clean);
-    }
-  }
+  const segments = folderPath
+    .map(sanitizeLabel)
+    .filter((s) => s && s !== "tab-stash");
+
+  const label = segments.length > 0
+    ? `${config.tagPrefix}/${segments.join("/")}`
+    : config.tagPrefix;
 
   const payload: HisterAddRequest = {
     url,
     title: title || url,
-    labels: Array.from(new Set(labels)),
+    label,
+    labels: [label],
   };
 
   const headers: Record<string, string> = {

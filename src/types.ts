@@ -17,6 +17,7 @@ export const DEFAULT_CONFIG: BridgeConfig = {
 export interface HisterAddRequest {
   url: string;
   title?: string;
+  label?: string;
   labels?: string[];
 }
 
