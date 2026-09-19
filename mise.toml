@@ -74,6 +74,12 @@ pnpx web-ext run \
   --firefox-profile ./dev-profile \
   --profile-create-if-missing \
   --keep-profile-changes \
+  --watch-file dist/background.js \
+  --watch-file dist/options.js \
+  --watch-file manifest.json \
+  --watch-ignored "dev-profile/**" \
+  --watch-ignored "dev-data/**" \
+  --watch-ignored "node_modules/**" \
   --start-url "about:debugging#/runtime/this-firefox"
 """
 
