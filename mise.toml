@@ -13,9 +13,6 @@ actionlint = "1.7.12"
 shellcheck = "0.11.0"
 "github:zizmorcore/zizmor" = "v1.30.1"
 
-[env]
-PATH = "{{config_root}}/bin:$PATH"
-
 [tasks."hister:up"]
 description = "Start a local Hister daemon on localhost:4433 via Docker"
 run = """
@@ -50,8 +47,8 @@ description = "Install bridge dependencies"
 run = "pnpm install"
 
 [tasks."bridge:build"]
-description = "Bundle bridge extension with tsup"
-run = "pnpm build"
+description = "Bundle bridge extension with tsup (alias of `build`)"
+depends = ["build"]
 
 [tasks."test"]
 description = "Run bridge tests with Vitest"
@@ -102,6 +99,97 @@ echo "=== Dev Environment Ready ==="
 echo "1. Hister running at: http://localhost:4433"
 echo "2. Bridge bundled in ./dist"
 echo "To launch Firefox with the bridge: mise run dev:firefox"
+"""
+
+# ---------------------------------------------------------------------------
+# Quality gates
+# ---------------------------------------------------------------------------
+
+[tasks.format]
+alias = "fmt"
+description = "Format the repository with Prettier (write in place)"
+run = "pnpm run format"
+
+[tasks.format-check]
+alias = "fmtcheck"
+description = "Check Prettier formatting without writing"
+run = "pnpm run format:check"
+
+[tasks."lint:oxlint"]
+description = "Lint source files with oxlint (type-aware)"
+run = "pnpm run lint"
+
+[tasks."lint:fix"]
+description = "Auto-fix oxlint findings"
+run = "pnpm run lint:fix"
+
+[tasks.check]
+description = "Type-check the extension with tsc"
+run = "pnpm run typecheck"
+
+[tasks.typecheck]
+description = "Type-check the extension (alias of `check`)"
+depends = ["check"]
+
+[tasks.fix]
+description = "Auto-format + auto-fix lint findings"
+run = """
+mise run format
+mise run lint:fix
+echo 'Auto-fix complete. Run `mise run check` to verify types.'
+"""
+
+# Static checks only (no tests, no build).
+[tasks.lint]
+description = "Run all static checks (format + oxlint + types)"
+run = """
+mise run format-check
+mise run lint:oxlint
+mise run check
+echo 'All lint checks passed.'
+"""
+
+# All quality gates: static checks + unit tests. The pre-push / pre-PR gate.
+[tasks.verify]
+description = "Run all quality gates (static checks + unit tests)"
+run = """
+mise run lint
+mise run test
+echo 'All quality gates passed.'
+"""
+
+[tasks.build]
+description = "Bundle the extension with tsup"
+run = "pnpm run build"
+
+# ---------------------------------------------------------------------------
+# Audit
+# ---------------------------------------------------------------------------
+
+[tasks."audit:prod"]
+description = "Audit production dependencies for known vulnerabilities"
+run = "pnpm audit --prod --audit-level high --ignore-registry-errors"
+
+[tasks."audit:all"]
+description = "Audit all dependencies for known vulnerabilities"
+run = "pnpm audit --audit-level high --ignore-registry-errors"
+
+[tasks."audit:signatures"]
+description = "Verify registry signatures for installed packages"
+run = "pnpm audit signatures"
+
+# ---------------------------------------------------------------------------
+# CI
+# ---------------------------------------------------------------------------
+
+[tasks.ci]
+description = "Run the local CI pipeline (quality + audit + build)"
+run = """
+mise run verify
+mise run audit:all
+mise run audit:signatures
+mise run build
+echo 'tab-hister-bridge checks completed successfully.'
 """
 
 [tasks."ci:dagger"]
