@@ -5,6 +5,11 @@ experimental = true
 lockfile = true
 minimum_release_age = "7d"
 
+[env]
+# Tab Stash checkout used by the tabstash:* tasks. Defaults to ../tab-stash;
+# override from the shell with TABSTASH_DIR=/path/to/tab-stash.
+TABSTASH_DIR = "{{ env.TABSTASH_DIR | default(value='../tab-stash') }}"
+
 [tools]
 node = "26"
 pnpm = "12"
@@ -35,12 +40,12 @@ description = "Follow local Hister logs"
 run = "docker logs -f hister-dev"
 
 [tasks."tabstash:install"]
-description = "Install dependencies in ../tab-stash"
-run = "pnpm -C ../tab-stash install --no-lockfile"
+description = "Install dependencies in the Tab Stash checkout ($TABSTASH_DIR)"
+run = 'pnpm -C "$TABSTASH_DIR" install --no-lockfile'
 
 [tasks."tabstash:build"]
-description = "Build the Tab Stash extension in ../tab-stash"
-run = "make -C ../tab-stash build-dbg"
+description = "Build the Tab Stash extension in the checkout ($TABSTASH_DIR)"
+run = 'make -C "$TABSTASH_DIR" build-dbg'
 
 [tasks."bridge:install"]
 description = "Install bridge dependencies"
