@@ -1,0 +1,23 @@
+{
+  "name": "tab-hister-bridge",
+  "version": "0.1.0",
+  "description": "Sidecar bridge connecting Firefox Tab Stash with Hister archival search engine",
+  "main": "dist/background.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsup",
+    "watch": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/firefox-webext-browser": "^143.0.0",
+    "@types/node": "^22.13.9",
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.7",
+    "web-ext": "^8.4.0"
+  },
+  "license": "MIT"
+}

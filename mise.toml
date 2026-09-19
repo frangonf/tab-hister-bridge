@@ -1,0 +1,69 @@
+[tools]
+node = "26"
+pnpm = "12"
+
+[env]
+PATH = "{{config_root}}/bin:$PATH"
+
+[tasks."hister:up"]
+description = "Start a local Hister daemon on localhost:4433 via Docker"
+run = """
+docker rm -f hister-dev 2>/dev/null || true
+mkdir -p dev-data
+docker run -d --name hister-dev \
+  -p 4433:4433 \
+  -e HISTER__SERVER__ADDRESS=0.0.0.0:4433 \
+  -v "$PWD/dev-data:/hister/data" \
+  ghcr.io/asciimoo/hister:latest
+echo "Hister running at http://localhost:4433"
+"""
+
+[tasks."hister:down"]
+description = "Stop the local Hister daemon"
+run = "docker rm -f hister-dev"
+
+[tasks."hister:logs"]
+description = "Follow local Hister logs"
+run = "docker logs -f hister-dev"
+
+[tasks."tabstash:install"]
+description = "Install dependencies in ../tab-stash"
+run = "npm --prefix ../tab-stash install"
+
+[tasks."tabstash:build"]
+description = "Build the Tab Stash extension in ../tab-stash"
+run = "make -C ../tab-stash build-dbg"
+
+[tasks."bridge:install"]
+description = "Install bridge dependencies"
+run = "pnpm install"
+
+[tasks."bridge:build"]
+description = "Bundle bridge extension with tsup"
+run = "pnpm build"
+
+[tasks."test"]
+description = "Run bridge tests with Vitest"
+run = "pnpm test"
+
+[tasks."dev:firefox"]
+description = "Launch isolated Firefox running Tab Stash and the Bridge"
+depends = ["bridge:build"]
+run = """
+npx web-ext run \
+  --source-dir . \
+  --firefox-profile ./dev-profile \
+  --profile-create-if-missing \
+  --keep-profile-changes \
+  --start-url "about:debugging#/runtime/this-firefox"
+"""
+
+[tasks."dev"]
+description = "Start the complete local development ecosystem"
+depends = ["hister:up", "bridge:build"]
+run = """
+echo "=== Dev Environment Ready ==="
+echo "1. Hister running at: http://localhost:4433"
+echo "2. Bridge bundled in ./dist"
+echo "To launch Firefox with the bridge: mise run dev:firefox"
+"""

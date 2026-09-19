@@ -1,0 +1,8 @@
+node_modules/
+dist/
+dev-profile/
+dev-data/
+web-ext-artifacts/
+.DS_Store
+*.log
+.mise.local.toml

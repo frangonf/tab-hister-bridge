@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -e
+
+REAL_INKSCAPE=$(which -a inkscape 2>/dev/null | grep -v "$0" | head -n 1 || true)
+if [ -n "$REAL_INKSCAPE" ] && [ -x "$REAL_INKSCAPE" ]; then
+  exec "$REAL_INKSCAPE" "$@"
+fi
+
+INPUT=""
+OUTPUT=""
+WIDTH=""
+HEIGHT=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o|--export-filename)
+      OUTPUT="$2"
+      shift 2
+      ;;
+    -w|--export-width)
+      WIDTH="$2"
+      shift 2
+      ;;
+    -h|--export-height)
+      HEIGHT="$2"
+      shift 2
+      ;;
+    -D|--export-area-drawing)
+      shift
+      ;;
+    *)
+      if [ -z "$INPUT" ] && [ -f "$1" ]; then
+        INPUT="$1"
+      fi
+      shift
+      ;;
+  esac
+done
+
+if [ -n "$INPUT" ] && [ -n "$OUTPUT" ]; then
+  mkdir -p "$(dirname "$OUTPUT")"
+  ARGS=()
+  [ -n "$WIDTH" ] && ARGS+=("-w" "$WIDTH")
+  [ -n "$HEIGHT" ] && ARGS+=("-h" "$HEIGHT")
+  exec rsvg-convert "${ARGS[@]}" "$INPUT" -o "$OUTPUT"
+fi
+
+echo "Unsupported inkscape shim invocation: $*" >&2
+exit 1
