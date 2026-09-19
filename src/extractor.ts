@@ -15,9 +15,10 @@ export interface ExtractedPage {
 /** Convert Defuddle's clean HTML content into plain text for full-text indexing. */
 export function contentToPlainText(content: string): string {
   if (!content) return "";
-  return content
-    // Remove HTML tags
-    .replace(/<[^>]+>/g, " ")
+  const withoutTags = content.replace(/<[^>]+>/g, " ");
+  const decoded = new DOMParser().parseFromString(withoutTags, "text/html").body.textContent || "";
+  return (
+    decoded
     // Remove markdown links [text](url) -> text
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
     // Remove images ![alt](url) -> alt
@@ -31,7 +32,8 @@ export function contentToPlainText(content: string): string {
     .replace(/[*_~=]/g, " ")
     // Collapse multiple spaces/newlines
     .replace(/\s+/g, " ")
-    .trim();
+      .trim()
+  );
 }
 
 /**
@@ -41,7 +43,7 @@ export function contentToPlainText(content: string): string {
 export function extractPageContent(
   html: string,
   url: string,
-  fallbackTitle?: string
+  fallbackTitle?: string,
 ): ExtractedPage {
   if (!html || !html.trim()) {
     return {
@@ -61,6 +63,14 @@ export function extractPageContent(
     const title = res.title?.trim() || fallbackTitle || url;
     const cleanHtml = res.content || "";
     const text = contentToPlainText(cleanHtml);
+    if (!text) {
+      return {
+        title,
+        text: "",
+        cleanHtml: html,
+        extractedByDefuddle: false,
+      };
+    }
 
     return {
       title,

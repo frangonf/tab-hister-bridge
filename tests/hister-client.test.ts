@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  addHisterPdfRequest,
   checkHisterConnection,
   deleteHisterDocumentRequest,
   getHisterDocument,
@@ -8,43 +9,31 @@ import {
 
 describe("checkHisterConnection", () => {
   it("rejects an invalid access token", async () => {
-    const fetchFn = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      new Response("unauthorized", { status: 401 })
-    );
+    const fetchFn = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("unauthorized", { status: 401 }));
 
-    const result = await checkHisterConnection(
-      fetchFn,
-      "http://127.0.0.1:4433",
-      { Authorization: "Bearer invalid" }
-    );
+    const result = await checkHisterConnection(fetchFn, "http://127.0.0.1:4433", {
+      Authorization: "Bearer invalid",
+    });
 
     expect(result).toEqual({ reachable: true, authorized: false, status: 401 });
   });
 
   it("reports network failures as unreachable", async () => {
-    const fetchFn = vi.fn<typeof fetch>().mockRejectedValueOnce(
-      new TypeError("network down")
-    );
+    const fetchFn = vi.fn<typeof fetch>().mockRejectedValueOnce(new TypeError("network down"));
 
-    const result = await checkHisterConnection(
-      fetchFn,
-      "http://127.0.0.1:4433",
-      {}
-    );
+    const result = await checkHisterConnection(fetchFn, "http://127.0.0.1:4433", {});
 
     expect(result).toEqual({ reachable: false, authorized: false });
   });
 
   it("accepts an authenticated document-not-found response", async () => {
-    const fetchFn = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      new Response("not found", { status: 404 })
-    );
+    const fetchFn = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("not found", { status: 404 }));
 
-    const result = await checkHisterConnection(
-      fetchFn,
-      "http://127.0.0.1:4433/",
-      {}
-    );
+    const result = await checkHisterConnection(fetchFn, "http://127.0.0.1:4433/", {});
 
     expect(result).toEqual({ reachable: true, authorized: true, status: 404 });
   });
@@ -61,14 +50,14 @@ describe("getHisterDocument", () => {
           text: "Body",
           label: "manual",
           metadata: { source: "existing" },
-        })
+        }),
       );
 
     const result = await getHisterDocument(
       fetchFn,
       "http://127.0.0.1:4433",
       "https://example.com/page?utm_source=x#part",
-      {}
+      {},
     );
 
     expect(result).toMatchObject({
@@ -91,7 +80,7 @@ describe("getHisterDocument", () => {
           text: "Canonical",
           label: "stash",
           metadata: {},
-        })
+        }),
       )
       .mockResolvedValueOnce(
         Response.json({
@@ -99,14 +88,14 @@ describe("getHisterDocument", () => {
           text: "Legacy",
           label: "manual",
           metadata: {},
-        })
+        }),
       );
 
     const result = await getHisterDocument(
       fetchFn,
       "http://127.0.0.1:4433",
       "https://example.com/page?utm_source=x#part",
-      {}
+      {},
     );
 
     expect(result).toMatchObject({
@@ -126,7 +115,7 @@ describe("getHisterDocument", () => {
       fetchFn,
       "http://127.0.0.1:4433",
       "https://example.com/page?utm_source=x#part",
-      {}
+      {},
     );
 
     expect(result).toMatchObject({ exists: false, lookupStatus: 401 });
@@ -134,17 +123,55 @@ describe("getHisterDocument", () => {
   });
 });
 
+describe("addHisterPdfRequest", () => {
+  it("sends PDF bytes to Hister's PDF ingestion endpoint", async () => {
+    const fetchFn = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 201 }));
+
+    const result = await addHisterPdfRequest(
+      fetchFn,
+      "http://127.0.0.1:4433/",
+      {
+        url: "https://example.com/report.pdf",
+        title: "Report",
+        label: "stash/reports",
+        metadata: { source: "bookmark" },
+      },
+      new Uint8Array([0x25, 0x50, 0x44, 0x46]).buffer,
+      {},
+    );
+
+    expect(result).toEqual({ ok: true, status: 201 });
+    expect(fetchFn).toHaveBeenCalledWith(
+      "http://127.0.0.1:4433/api/add_pdf",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          document: {
+            url: "https://example.com/report.pdf",
+            title: "Report",
+            label: "stash/reports",
+            metadata: { source: "bookmark" },
+          },
+          pdf: "JVBERg==",
+        }),
+      }),
+    );
+  });
+});
+
 describe("deleteHisterDocumentRequest", () => {
   it("deletes a legacy raw URL through Hister's URL query", async () => {
-    const fetchFn = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      new Response(null, { status: 200 })
-    );
+    const fetchFn = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 200 }));
 
     const ok = await deleteHisterDocumentRequest(
       fetchFn,
       "http://127.0.0.1:4433",
       "https://example.com/page?utm_source=x#part",
-      {}
+      {},
     );
 
     expect(ok).toBe(true);
@@ -152,8 +179,10 @@ describe("deleteHisterDocumentRequest", () => {
       "http://127.0.0.1:4433/api/delete",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ query: "url:https://example.com/page?utm_source=x#part" }),
-      })
+        body: JSON.stringify({
+          query: 'url:"https://example.com/page?utm_source=x#part"',
+        }),
+      }),
     );
   });
 });
@@ -170,7 +199,7 @@ describe("updateHisterLabelRequest", () => {
       "http://127.0.0.1:4433",
       "https://example.com/page?utm_source=x#part",
       "stash/group",
-      {}
+      {},
     );
 
     expect(result).toEqual({

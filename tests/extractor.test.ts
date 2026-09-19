@@ -1,10 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
-import {
-  DEFUDDLE_VERSION,
-  extractPageContent,
-  contentToPlainText,
-} from "../src/extractor";
+import { DEFUDDLE_VERSION, extractPageContent, contentToPlainText } from "../src/extractor";
 
 describe("Defuddle Extractor Module", () => {
   it("keeps the extraction marker aligned with the pinned Defuddle dependency", () => {
@@ -15,9 +11,16 @@ describe("Defuddle Extractor Module", () => {
   });
 
   it("converts formatted content to clean plain text", () => {
-    const md = "## Title\n\nThis is [a link](https://example.com) with **bold** and `inline code`.\n\n* Bullet 1\n* Bullet 2";
+    const md =
+      "## Title\n\nThis is [a link](https://example.com) with **bold** and `inline code`.\n\n* Bullet 1\n* Bullet 2";
     const plain = contentToPlainText(md);
     expect(plain).toBe("Title This is a link with bold and inline code. Bullet 1 Bullet 2");
+  });
+
+  it("decodes HTML entities while preserving spacing between blocks", () => {
+    expect(contentToPlainText("<p>Rock &amp; roll</p><p>A&nbsp;B &#39;C&#39;</p>")).toBe(
+      "Rock & roll A B 'C'",
+    );
   });
 
   it("extracts clean title, HTML, and text from an HTML string", async () => {
@@ -52,11 +55,21 @@ describe("Defuddle Extractor Module", () => {
     expect(result.text).toContain("agile tooling and open architectures");
   });
 
+  it("treats empty dynamic shells as failed extraction", () => {
+    const html =
+      '<!doctype html><html><head><title>App</title></head><body><div id="root"></div></body></html>';
+    const result = extractPageContent(html, "https://app.example", "App");
+
+    expect(result.extractedByDefuddle).toBe(false);
+    expect(result.text).toBe("");
+    expect(result.cleanHtml).toBe(html);
+  });
+
   it("does not mistake an HTML document beginning with a comment for Markdown", () => {
     const result = extractPageContent(
       "<!-- build --><!doctype html><html><head><title>Expected</title></head><body><nav>Noise</nav><main><h1>Article</h1><p>Body</p></main></body></html>",
       "https://example.com/article",
-      "Fallback"
+      "Fallback",
     );
 
     expect(result.title).toBe("Expected");

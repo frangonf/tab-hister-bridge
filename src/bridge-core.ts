@@ -1,6 +1,17 @@
 import type { ExtractedPage } from "./extractor";
 import type { HisterAddRequest } from "./types";
 
+export function withoutDefuddleMetadata(
+  metadata: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  const cleaned = { ...(metadata ?? {}) };
+  if (cleaned.extractor === "defuddle") {
+    delete cleaned.extractor;
+    delete cleaned.extractor_version;
+  }
+  return cleaned;
+}
+
 export function buildHisterPayload(options: {
   rawUrl: string;
   title: string;
@@ -27,37 +38,36 @@ export function buildHisterPayload(options: {
       extractor_version: options.defuddleVersion,
     };
   } else if (options.existingMetadata) {
-    payload.metadata = { ...options.existingMetadata };
+    payload.metadata = withoutDefuddleMetadata(options.existingMetadata);
   }
   return payload;
 }
 
 export function sanitizeLabel(text: string): string {
   return text
+    .normalize("NFKD")
     .toLowerCase()
-    .replace(/[^\w-]/g, "-")
+    .replace(/(\p{Script=Latin})\p{M}+/gu, "$1")
+    .replace(/[^\p{L}\p{M}\p{N}_-]+/gu, "-")
     .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
+    .replace(/^-|-$/g, "")
+    .normalize("NFC");
 }
 
-export function computeStashLabel(
-  folderPath: string[],
-  tagPrefix: string
-): string {
+export function computeStashLabel(folderPath: string[], tagPrefix: string): string {
   const segments = folderPath
     .map(sanitizeLabel)
     .filter((segment) => segment && segment !== "tab-stash");
-  return segments.length > 0
-    ? `${tagPrefix}/${segments.join("/")}`
-    : tagPrefix;
+  return segments.length > 0 ? `${tagPrefix}/${segments.join("/")}` : tagPrefix;
+}
+
+export function shouldUpdateLabel(currentLabel: string, targetLabel: string): boolean {
+  return currentLabel !== targetLabel;
 }
 
 export type StashMoveAction = "none" | "apply" | "restore";
 
-export function classifyStashMove(
-  wasInside: boolean,
-  isInside: boolean
-): StashMoveAction {
+export function classifyStashMove(wasInside: boolean, isInside: boolean): StashMoveAction {
   if (isInside) return "apply";
   return wasInside ? "restore" : "none";
 }
@@ -69,14 +79,57 @@ export interface StashBookmark {
   folderPath: string[];
 }
 
+function adjustStashUrlCount(
+  counts: Map<string, number>,
+  rawUrl: string,
+  adjustment: 1 | -1,
+): void {
+  const url = normalizeUrl(rawUrl);
+  const next = (counts.get(url) ?? 0) + adjustment;
+  if (next > 0) counts.set(url, next);
+  else counts.delete(url);
+}
+
+export function buildStashUrlCounts(
+  snapshot: ReadonlyMap<string, StashBookmark>,
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const item of snapshot.values()) {
+    adjustStashUrlCount(counts, item.url, 1);
+  }
+  return counts;
+}
+
+export function updateStashSnapshot(
+  snapshot: Map<string, StashBookmark>,
+  item: StashBookmark | null,
+  removedId?: string,
+  urlCounts?: Map<string, number>,
+): Map<string, StashBookmark> {
+  const replacedId = removedId ?? item?.id;
+  const previous = replacedId ? snapshot.get(replacedId) : undefined;
+  if (previous && urlCounts) adjustStashUrlCount(urlCounts, previous.url, -1);
+  if (removedId) snapshot.delete(removedId);
+  if (item) {
+    snapshot.set(item.id, item);
+    if (urlCounts) adjustStashUrlCount(urlCounts, item.url, 1);
+  }
+  return snapshot;
+}
+
 export function computeStashChanges(
   previous: ReadonlyMap<string, StashBookmark>,
-  current: ReadonlyMap<string, StashBookmark>
+  current: ReadonlyMap<string, StashBookmark>,
 ): { removed: StashBookmark[]; changed: StashBookmark[] } {
   const removed = Array.from(previous.values()).filter((item) => !current.has(item.id));
   const changed = Array.from(current.values()).filter((item) => {
     const old = previous.get(item.id);
-    return !old || old.url !== item.url || old.title !== item.title || old.folderPath.join("\0") !== item.folderPath.join("\0");
+    return (
+      !old ||
+      old.url !== item.url ||
+      old.title !== item.title ||
+      old.folderPath.join("\0") !== item.folderPath.join("\0")
+    );
   });
   return { removed, changed };
 }
@@ -93,12 +146,49 @@ export function selectTabStashRoot<T extends StashRootCandidate>(candidates: T[]
   if (exact.length === 0) return null;
 
   const minimumDepth = Math.min(...exact.map((candidate) => candidate.depth));
-  return [...exact]
+  return (
+    [...exact]
     .filter((candidate) => candidate.depth === minimumDepth)
     .sort((a, b) => {
       const byDate = (a.dateAdded ?? 0) - (b.dateAdded ?? 0);
       return byDate || a.id.localeCompare(b.id);
-    })[0] ?? null;
+      })[0] ?? null
+  );
+}
+
+export type FetchedContentKind = "html" | "pdf" | "unsupported";
+
+export function shouldSubmitFetchedContent(
+  documentHasContent: boolean,
+  kind: Exclude<FetchedContentKind, "unsupported"> | null,
+  extractedByDefuddle: boolean,
+): boolean {
+  if (kind === null) return false;
+  if (kind === "pdf") return true;
+  return !documentHasContent || extractedByDefuddle;
+}
+
+export function classifyFetchedContent(
+  rawUrl: string,
+  contentType: string | null,
+): FetchedContentKind {
+  const mediaType = contentType?.split(";", 1)[0]?.trim().toLowerCase() || "";
+  let pdfPath = false;
+  try {
+    pdfPath = new URL(rawUrl).pathname.toLowerCase().endsWith(".pdf");
+  } catch {
+    // URL validation is handled separately.
+  }
+  if (mediaType === "application/pdf" || pdfPath) return "pdf";
+  if (
+    mediaType === "" ||
+    mediaType.startsWith("text/") ||
+    mediaType === "application/xhtml+xml" ||
+    mediaType === "application/xml"
+  ) {
+    return "html";
+  }
+  return "unsupported";
 }
 
 export function isSupportedPageUrl(rawUrl: string): boolean {
@@ -138,8 +228,9 @@ export function normalizeUrl(rawUrl: string): string {
     params.sort();
     const goQueryEscape = (value: string): string =>
       encodeURIComponent(value)
-        .replace(/[!'()*]/g, (character) =>
-          `%${character.charCodeAt(0).toString(16).toUpperCase()}`
+        .replace(
+          /[!'()*]/g,
+          (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
         )
         .replace(/%20/g, "+");
     const query = Array.from(params.entries())

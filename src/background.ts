@@ -7,16 +7,24 @@ import {
 } from "./types";
 import {
   buildHisterPayload,
+  buildStashUrlCounts,
+  classifyFetchedContent,
   classifyStashMove,
   computeStashChanges,
   computeStashLabel as buildStashLabel,
   isSupportedPageUrl,
   normalizeUrl,
   selectTabStashRoot,
+  shouldSubmitFetchedContent,
+  shouldUpdateLabel,
+  updateStashSnapshot,
+  withoutDefuddleMetadata,
   type StashBookmark,
 } from "./bridge-core";
+import { startBackgroundJob } from "./backfill-job";
 import { DEFUDDLE_VERSION, extractPageContent } from "./extractor";
 import {
+  addHisterPdfRequest,
   deleteHisterDocumentRequest,
   getHisterDocument,
   updateHisterLabelRequest,
@@ -29,6 +37,7 @@ const PREVIOUS_LABELS_KEY = "bridge_previous_labels";
 let config: BridgeConfig = { ...DEFAULT_CONFIG };
 let tabStashRootId: string | null = null;
 let stashSnapshot = new Map<string, StashBookmark>();
+let stashUrlCounts = new Map<string, number>();
 let snapshotInitialized = false;
 let previousLabels: Record<string, string> = {};
 let eventQueue: Promise<void> = Promise.resolve();
@@ -43,24 +52,18 @@ let currentBackfill: BackfillProgress = {
 let backfillPromise: Promise<BackfillProgress> | null = null;
 
 function authHeaders(): Record<string, string> {
-  return config.accessToken
-    ? { Authorization: `Bearer ${config.accessToken}` }
-    : {};
+  return config.accessToken ? { Authorization: `Bearer ${config.accessToken}` } : {};
 }
 
 async function loadState(): Promise<void> {
   try {
-    const stored = await browser.storage.local.get([
-      "bridge_config",
-      PREVIOUS_LABELS_KEY,
-    ]);
+    const stored = await browser.storage.local.get(["bridge_config", PREVIOUS_LABELS_KEY]);
     config = {
       ...DEFAULT_CONFIG,
       ...(stored.bridge_config as Partial<BridgeConfig> | undefined),
     };
     previousLabels =
-      stored[PREVIOUS_LABELS_KEY] &&
-      typeof stored[PREVIOUS_LABELS_KEY] === "object"
+      stored[PREVIOUS_LABELS_KEY] && typeof stored[PREVIOUS_LABELS_KEY] === "object"
         ? { ...(stored[PREVIOUS_LABELS_KEY] as Record<string, string>) }
         : {};
   } catch (error) {
@@ -102,16 +105,14 @@ export async function findTabStashRoot(): Promise<string | null> {
 
   try {
     const results = await browser.bookmarks.search({ title: "Tab Stash" });
-    const folders = results.filter(
-      (item) => !item.url && item.title === "Tab Stash"
-    );
+    const folders = results.filter((item) => !item.url && item.title === "Tab Stash");
     const candidates = await Promise.all(
       folders.map(async (item) => ({
         id: item.id,
         title: item.title,
         dateAdded: item.dateAdded,
         depth: await bookmarkDepth(item),
-      }))
+      })),
     );
     tabStashRootId = selectTabStashRoot(candidates)?.id ?? null;
   } catch (error) {
@@ -123,7 +124,7 @@ export async function findTabStashRoot(): Promise<string | null> {
 }
 
 export async function isInsideTabStash(
-  parentId: string | undefined
+  parentId: string | undefined,
 ): Promise<{ inside: boolean; path: string[] }> {
   if (!parentId) return { inside: false, path: [] };
 
@@ -159,7 +160,7 @@ function isManagedLabel(label: string): boolean {
 async function rememberPreviousLabel(
   rawUrl: string,
   status: HisterDocumentStatus,
-  targetLabel: string
+  targetLabel: string,
 ): Promise<void> {
   const key = normalizeUrl(rawUrl);
   if (
@@ -196,7 +197,11 @@ function unmarkPendingMobileUrl(rawUrl: string): void {
   consumePendingMobileUrl(rawUrl);
 }
 
-async function fetchPageHtml(rawUrl: string): Promise<string | null> {
+type FetchedPageContent = { kind: "html"; html: string } | { kind: "pdf"; bytes: ArrayBuffer };
+
+async function fetchPageContent(rawUrl: string): Promise<FetchedPageContent | null> {
+  const urlLooksLikePdf = classifyFetchedContent(rawUrl, null) === "pdf";
+  if (!urlLooksLikePdf) {
   try {
     const tabs = await browser.tabs.query({ url: rawUrl });
     for (const tab of tabs) {
@@ -204,10 +209,26 @@ async function fetchPageHtml(rawUrl: string): Promise<string | null> {
         try {
           const results = await browser.scripting.executeScript({
             target: { tabId: tab.id },
-            func: () => document.documentElement.outerHTML as unknown as void,
+              func: () =>
+                JSON.stringify({
+                  html: document.documentElement.outerHTML,
+                  contentType: document.contentType,
+                }) as unknown as void,
           });
           if (typeof results?.[0]?.result === "string") {
-            return results[0].result;
+              const page = JSON.parse(results[0].result) as {
+                html?: unknown;
+                contentType?: unknown;
+              };
+              if (
+                typeof page.html === "string" &&
+                classifyFetchedContent(
+                  rawUrl,
+                  typeof page.contentType === "string" ? page.contentType : null,
+                ) === "html"
+              ) {
+                return { kind: "html", html: page.html };
+              }
           }
         } catch {
           // Privileged pages cannot be scripted; use the network fallback.
@@ -217,41 +238,44 @@ async function fetchPageHtml(rawUrl: string): Promise<string | null> {
   } catch {
     // An invalid tab match pattern should not prevent the network fallback.
   }
+  }
 
   try {
     const response = await fetch(rawUrl, {
       headers: {
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        Accept: "text/html,application/xhtml+xml,application/pdf,application/xml;q=0.9,*/*;q=0.8",
       },
       signal: AbortSignal.timeout(12_000),
     });
-    return response.ok ? await response.text() : null;
+    if (!response.ok) return null;
+    const kind = classifyFetchedContent(rawUrl, response.headers.get("Content-Type"));
+    if (kind === "pdf") {
+      return { kind, bytes: await response.arrayBuffer() };
+    }
+    if (kind === "html") {
+      return { kind, html: await response.text() };
+    }
+    console.warn(
+      `[Bridge] Unsupported content type for ${rawUrl}: ${response.headers.get("Content-Type") ?? "unknown"}`,
+    );
+    return null;
   } catch (error) {
     console.warn(`[Bridge] Background fetch failed for ${rawUrl}:`, error);
     return null;
   }
 }
 
-export async function getHisterDocumentStatus(
-  rawUrl: string
-): Promise<HisterDocumentStatus> {
-  const status = await getHisterDocument(
-    fetch,
-    config.histerUrl,
-    rawUrl,
-    authHeaders()
-  );
+export async function getHisterDocumentStatus(rawUrl: string): Promise<HisterDocumentStatus> {
+  const status = await getHisterDocument(fetch, config.histerUrl, rawUrl, authHeaders());
   if (status.legacyUrl) {
     const deleted = await deleteHisterDocumentRequest(
       fetch,
       config.histerUrl,
       status.legacyUrl,
-      authHeaders()
+      authHeaders(),
     );
     if (!deleted) {
-      console.warn(
-        `[Bridge] Could not remove duplicate legacy identity ${status.legacyUrl}`
-      );
+      console.warn(`[Bridge] Could not remove duplicate legacy identity ${status.legacyUrl}`);
     }
   }
   return status;
@@ -259,20 +283,20 @@ export async function getHisterDocumentStatus(
 
 export async function updateHisterLabel(
   rawUrl: string,
-  newLabel: string
+  newLabel: string,
 ): Promise<HisterUpdateResult> {
   const result = await updateHisterLabelRequest(
     fetch,
     config.histerUrl,
     rawUrl,
     newLabel,
-    authHeaders()
+    authHeaders(),
   );
   if (result.ok) {
     console.log(`[Bridge] Updated label for ${result.actualUrl} -> "${newLabel}"`);
   } else if (result.status !== 404) {
     console.warn(
-      `[Bridge] Failed to update label for ${rawUrl}: ${result.status ?? "network error"}`
+      `[Bridge] Failed to update label for ${rawUrl}: ${result.status ?? "network error"}`,
     );
   }
   return result;
@@ -281,19 +305,12 @@ export async function updateHisterLabel(
 export async function pushToHister(
   rawUrl: string,
   title: string,
-  folderPath: string[]
+  folderPath: string[],
+  knownStatus?: HisterDocumentStatus,
 ): Promise<boolean> {
-  let parsedUrl: URL;
-  try {
-    parsedUrl = new URL(rawUrl);
-  } catch {
-    return false;
-  }
-  if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
-    return false;
-  }
+  if (!isSupportedPageUrl(rawUrl)) return false;
 
-  const status = await getHisterDocumentStatus(rawUrl);
+  const status = knownStatus ?? (await getHisterDocumentStatus(rawUrl));
   if (!status.exists && status.lookupStatus !== 404) {
     console.warn(`[Bridge] Cannot inspect existing Hister document for ${rawUrl}`);
     return false;
@@ -301,51 +318,94 @@ export async function pushToHister(
   const label = computeStashLabel(folderPath);
   await rememberPreviousLabel(rawUrl, status, label);
 
-  const rawHtml = await fetchPageHtml(rawUrl);
-  const extraction = rawHtml
-    ? extractPageContent(rawHtml, rawUrl, title)
-    : null;
-  const payload: HisterAddRequest = buildHisterPayload({
-    rawUrl,
-    title,
-    label,
-    extraction,
-    existingMetadata: status.metadata,
-    defuddleVersion: DEFUDDLE_VERSION,
-  });
-  // Let Hister normalize legacy identities through its standard ingestion path.
-  if (status.exists) payload.url = status.actualUrl;
+  const fetched = await fetchPageContent(rawUrl);
+  const extraction =
+    fetched?.kind === "html" ? extractPageContent(fetched.html, rawUrl, title) : null;
+  if (
+    !shouldSubmitFetchedContent(
+      status.exists && status.hasText,
+      fetched?.kind ?? null,
+      extraction?.extractedByDefuddle === true,
+    )
+  ) {
+    if (!status.exists) return false;
+    if (!shouldUpdateLabel(status.label, label)) return true;
+    return (await updateHisterLabel(status.actualUrl, label)).ok;
+  }
 
-  try {
-    const endpoint = `${config.histerUrl.replace(/\/$/, "")}/api/add`;
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify(payload),
-    });
-    if (!response.ok) {
-      console.warn(`[Bridge] Hister API returned ${response.status} for ${rawUrl}`);
+  let responseStatus: number | undefined;
+  if (fetched?.kind === "pdf") {
+    const pdfResult = await addHisterPdfRequest(
+      fetch,
+      config.histerUrl,
+      {
+        url: status.exists ? status.actualUrl : normalizeUrl(rawUrl),
+        title,
+        label,
+        metadata: withoutDefuddleMetadata(status.metadata),
+      },
+      fetched.bytes,
+      authHeaders(),
+    );
+    responseStatus = pdfResult.status;
+    if (!pdfResult.ok) {
+      console.warn(
+        `[Bridge] Hister PDF API returned ${responseStatus ?? "network error"} for ${rawUrl}`,
+      );
       return false;
     }
+  } else {
+    const payload: HisterAddRequest = buildHisterPayload({
+      rawUrl,
+      title,
+      label,
+      extraction,
+      existingMetadata: status.metadata,
+      defuddleVersion: DEFUDDLE_VERSION,
+    });
+    // Let Hister normalize legacy identities through its standard ingestion path.
+    if (status.exists) payload.url = status.actualUrl;
+
+    try {
+      const endpoint = `${config.histerUrl.replace(/\/$/, "")}/api/add`;
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify(payload),
+      });
+      responseStatus = response.status;
+      if (!response.ok) {
+        console.warn(`[Bridge] Hister API returned ${response.status} for ${rawUrl}`);
+        return false;
+      }
+    } catch (error) {
+      console.error(`[Bridge] Network error sending to Hister (${config.histerUrl}):`, error);
+      return false;
+    }
+  }
+
+  try {
     const canonicalUrl = normalizeUrl(rawUrl);
     if (status.matchedLegacyUrl) {
       const deleted = await deleteHisterDocumentRequest(
         fetch,
         config.histerUrl,
         status.actualUrl,
-        authHeaders()
+        authHeaders(),
       );
       if (!deleted) {
         console.warn(
-          `[Bridge] Indexed ${canonicalUrl}, but could not remove legacy identity ${status.actualUrl}`
+          `[Bridge] Indexed ${canonicalUrl}, but could not remove legacy identity ${status.actualUrl}`,
         );
       }
     }
-    console.log(`[Bridge] Successfully sent to Hister: ${canonicalUrl} (${label})`);
+    console.log(
+      `[Bridge] Successfully sent to Hister: ${canonicalUrl} (${label}, HTTP ${responseStatus})`,
+    );
     return true;
   } catch (error) {
-    console.error(`[Bridge] Network error sending to Hister (${config.histerUrl}):`, error);
-    return false;
+    console.error(`[Bridge] Legacy URL cleanup failed for ${rawUrl}:`, error);
+    return true;
   }
 }
 
@@ -356,9 +416,10 @@ async function applyStashLabel(item: StashBookmark): Promise<boolean> {
   await rememberPreviousLabel(item.url, status, label);
   if (!status.exists) {
     return status.lookupStatus === 404
-      ? pushToHister(item.url, item.title, item.folderPath)
+      ? pushToHister(item.url, item.title, item.folderPath, status)
       : false;
   }
+  if (!shouldUpdateLabel(status.label, label)) return true;
 
   const result = await updateHisterLabel(status.actualUrl, label);
   if (result.ok) return true;
@@ -368,15 +429,9 @@ async function applyStashLabel(item: StashBookmark): Promise<boolean> {
   return false;
 }
 
-async function restorePreviousLabel(
-  item: StashBookmark,
-  current: ReadonlyMap<string, StashBookmark>
-): Promise<boolean> {
+async function restorePreviousLabel(item: StashBookmark): Promise<boolean> {
   const canonicalUrl = normalizeUrl(item.url);
-  const duplicateRemains = Array.from(current.values()).some(
-    (candidate) => normalizeUrl(candidate.url) === canonicalUrl
-  );
-  if (duplicateRemains) return true;
+  if ((stashUrlCounts.get(canonicalUrl) ?? 0) > 0) return true;
 
   const label = Object.prototype.hasOwnProperty.call(previousLabels, canonicalUrl)
     ? previousLabels[canonicalUrl]
@@ -393,7 +448,7 @@ async function restorePreviousLabel(
 async function collectSubtreeBookmarks(
   folderId: string,
   folderPath: string[],
-  target: Map<string, StashBookmark>
+  target: Map<string, StashBookmark>,
 ): Promise<void> {
   const children = await browser.bookmarks.getChildren(folderId);
   for (const child of children) {
@@ -407,11 +462,7 @@ async function collectSubtreeBookmarks(
         });
       }
     } else {
-      await collectSubtreeBookmarks(
-        child.id,
-        [...folderPath, child.title],
-        target
-      );
+      await collectSubtreeBookmarks(child.id, [...folderPath, child.title], target);
     }
   }
 }
@@ -425,19 +476,13 @@ export async function collectTabStashBookmarks(): Promise<StashBookmark[]> {
 }
 
 async function currentStashMap(): Promise<Map<string, StashBookmark>> {
-  return new Map(
-    (await collectTabStashBookmarks()).map((item) => [item.id, item])
-  );
+  return new Map((await collectTabStashBookmarks()).map((item) => [item.id, item]));
 }
 
 async function ensureSnapshot(): Promise<void> {
   if (snapshotInitialized) return;
   stashSnapshot = await currentStashMap();
-  snapshotInitialized = true;
-}
-
-async function refreshSnapshot(): Promise<void> {
-  stashSnapshot = await currentStashMap();
+  stashUrlCounts = buildStashUrlCounts(stashSnapshot);
   snapshotInitialized = true;
 }
 
@@ -448,13 +493,14 @@ async function reconcileStashTree(): Promise<void> {
   const current = await currentStashMap();
   const changes = computeStashChanges(previous, current);
   stashSnapshot = current;
+  stashUrlCounts = buildStashUrlCounts(stashSnapshot);
 
   const restoredUrls = new Set<string>();
   for (const item of changes.removed) {
     const canonicalUrl = normalizeUrl(item.url);
     if (restoredUrls.has(canonicalUrl)) continue;
     restoredUrls.add(canonicalUrl);
-    await restorePreviousLabel(item, current);
+    await restorePreviousLabel(item);
   }
   for (const item of changes.changed) {
     if (!isPendingMobileUrl(item.url)) {
@@ -475,19 +521,26 @@ function registerBookmarkListeners(): void {
     enqueueBookmarkTask(async () => {
       await ensureSnapshot();
       if (!bookmark.url) {
-        await reconcileStashTree();
-        return;
-      }
-      if (consumePendingMobileUrl(bookmark.url)) {
-        await refreshSnapshot();
+        if (bookmark.title === "Tab Stash") {
+          await reconcileStashTree();
+        }
         return;
       }
       const location = await isInsideTabStash(bookmark.parentId);
-      if (location.inside) {
-        await pushToHister(bookmark.url, bookmark.title, location.path);
+      if (!location.inside || !isSupportedPageUrl(bookmark.url)) return;
+      const item: StashBookmark = {
+        id,
+        url: bookmark.url,
+        title: bookmark.title || bookmark.url,
+        folderPath: location.path,
+      };
+      if (consumePendingMobileUrl(bookmark.url)) {
+        stashSnapshot = updateStashSnapshot(stashSnapshot, item, undefined, stashUrlCounts);
+        return;
       }
-      await refreshSnapshot();
-    })
+      await pushToHister(bookmark.url, bookmark.title, location.path);
+      stashSnapshot = updateStashSnapshot(stashSnapshot, item, undefined, stashUrlCounts);
+    }),
   );
 
   browser.bookmarks.onMoved.addListener((id, moveInfo) =>
@@ -509,21 +562,20 @@ function registerBookmarkListeners(): void {
         folderPath: newLocation.path,
       };
 
-      const action = classifyStashMove(
-        oldLocation.inside,
-        newLocation.inside
-      );
-      if (action === "apply") {
+      const action = classifyStashMove(oldLocation.inside, newLocation.inside);
+      if (action === "apply" && isSupportedPageUrl(item.url)) {
         await applyStashLabel(item);
+        stashSnapshot = updateStashSnapshot(stashSnapshot, item, undefined, stashUrlCounts);
       } else if (action === "restore") {
-        const current = await currentStashMap();
-        await restorePreviousLabel(
-          stashSnapshot.get(id) ?? { ...item, folderPath: oldLocation.path },
-          current
-        );
+        const previous = stashSnapshot.get(id) ?? {
+          ...item,
+          folderPath: oldLocation.path,
+        };
+        const current = updateStashSnapshot(stashSnapshot, null, id, stashUrlCounts);
+        await restorePreviousLabel(previous);
+        stashSnapshot = current;
       }
-      await refreshSnapshot();
-    })
+    }),
   );
 
   browser.bookmarks.onChanged.addListener((id) =>
@@ -538,36 +590,57 @@ function registerBookmarkListeners(): void {
 
       const old = stashSnapshot.get(id);
       const location = await isInsideTabStash(node.parentId);
-      const current = await currentStashMap();
-      if (old && normalizeUrl(old.url) !== normalizeUrl(node.url)) {
-        await restorePreviousLabel(old, current);
+      if (!old && !location.inside) return;
+      const item: StashBookmark = {
+        id,
+        url: node.url,
+        title: node.title || node.url,
+        folderPath: location.path,
+      };
+      const supported = isSupportedPageUrl(node.url);
+      const current =
+        location.inside && supported
+          ? updateStashSnapshot(stashSnapshot, item, undefined, stashUrlCounts)
+          : updateStashSnapshot(stashSnapshot, null, id, stashUrlCounts);
+      if (
+        old &&
+        (normalizeUrl(old.url) !== normalizeUrl(node.url) || !location.inside || !supported)
+      ) {
+        await restorePreviousLabel(old);
       }
-      if (location.inside) {
+      if (location.inside && supported) {
         await pushToHister(node.url, node.title, location.path);
       }
       stashSnapshot = current;
-    })
+    }),
   );
 
-  browser.bookmarks.onRemoved.addListener((id) =>
+  browser.bookmarks.onRemoved.addListener((id, removeInfo) =>
     enqueueBookmarkTask(async () => {
       await ensureSnapshot();
       const old = stashSnapshot.get(id);
       if (old) {
-        const current = await currentStashMap();
-        await restorePreviousLabel(old, current);
+        const current = updateStashSnapshot(stashSnapshot, null, id, stashUrlCounts);
+        await restorePreviousLabel(old);
         stashSnapshot = current;
-      } else {
+      } else if (!removeInfo.node.url) {
         // A folder removal can remove many cached descendants in one event.
         await reconcileStashTree();
       }
-    })
+    }),
   );
 }
 
 export async function runBackfill(): Promise<BackfillProgress> {
   if (backfillPromise) return backfillPromise;
 
+  currentBackfill = {
+    total: 0,
+    processed: 0,
+    failed: 0,
+    inProgress: true,
+    message: "Discovering Tab Stash bookmarks...",
+  };
   backfillPromise = (async () => {
     const stashes = await collectTabStashBookmarks();
     currentBackfill = {
@@ -583,24 +656,21 @@ export async function runBackfill(): Promise<BackfillProgress> {
       currentBackfill.message = `Processing (${index + 1}/${stashes.length}): ${item.title.slice(0, 40)}`;
       try {
         const status = await getHisterDocumentStatus(item.url);
+        const targetLabel = computeStashLabel(item.folderPath);
         const defuddleCurrent =
           status.metadata.extractor === "defuddle" &&
           status.metadata.extractor_version === DEFUDDLE_VERSION;
+        const likelyPdf = classifyFetchedContent(item.url, null) === "pdf";
         let ok: boolean;
         if (!status.exists && status.lookupStatus !== 404) {
           ok = false;
-        } else if (!status.exists || !status.hasText || !defuddleCurrent) {
-          ok = await pushToHister(item.url, item.title, item.folderPath);
+        } else if (!status.exists || !status.hasText || !defuddleCurrent || likelyPdf) {
+          ok = await pushToHister(item.url, item.title, item.folderPath, status);
         } else {
-          await rememberPreviousLabel(
-            item.url,
-            status,
-            computeStashLabel(item.folderPath)
-          );
-          ok = (await updateHisterLabel(
-            status.actualUrl,
-            computeStashLabel(item.folderPath)
-          )).ok;
+          await rememberPreviousLabel(item.url, status, targetLabel);
+          ok = shouldUpdateLabel(status.label, targetLabel)
+            ? (await updateHisterLabel(status.actualUrl, targetLabel)).ok
+            : true;
         }
         if (ok) currentBackfill.processed++;
         else currentBackfill.failed++;
@@ -638,9 +708,7 @@ async function syncMobileStashes(): Promise<void> {
     if (items.length === 0) return;
 
     const existing = await browser.bookmarks.getChildren(rootId);
-    let mobileInbox = existing.find(
-      (child) => child.title === "Mobile Inbox" && !child.url
-    );
+    let mobileInbox = existing.find((child) => child.title === "Mobile Inbox" && !child.url);
     if (!mobileInbox) {
       mobileInbox = await browser.bookmarks.create({
         parentId: rootId,
@@ -682,10 +750,29 @@ browser.runtime.onMessage.addListener((message: unknown) => {
     });
   }
   if (action === "start_backfill") {
-    // Returning this promise keeps the MV3 background event alive for the job.
-    return startup
-      .then(() => runBackfill())
-      .then((progress) => ({ progress }));
+    const acknowledgement = startBackgroundJob(
+      async () => {
+        await startup;
+        await runBackfill();
+      },
+      {
+        progress: {
+          ...currentBackfill,
+          inProgress: true,
+          message: "Backfill queued...",
+        },
+      },
+      (error) => {
+        console.error("[Bridge] Backfill failed:", error);
+        currentBackfill = {
+          ...currentBackfill,
+          inProgress: false,
+          failed: Math.max(1, currentBackfill.failed),
+          message: `Backfill failed: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      },
+    );
+    return Promise.resolve(acknowledgement);
   }
   return false;
 });
@@ -716,9 +803,7 @@ const startup = loadState().then(async () => {
   browser.alarms.create("poll_mobile_stashes", {
     periodInMinutes: config.pollIntervalMinutes,
   });
-  console.log(
-    "[Bridge] Extension initialized and listening for Tab Stash bookmarks."
-  );
+  console.log("[Bridge] Extension initialized and listening for Tab Stash bookmarks.");
   await syncMobileStashes();
 });
 

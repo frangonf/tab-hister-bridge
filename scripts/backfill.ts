@@ -1,21 +1,31 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { Window } from "happy-dom";
 import {
   buildHisterPayload,
+  classifyFetchedContent,
   computeStashLabel,
   isSupportedPageUrl,
   normalizeUrl,
   selectTabStashRoot,
+  withoutDefuddleMetadata,
 } from "../src/bridge-core";
 import { DEFUDDLE_VERSION, extractPageContent, type ExtractedPage } from "../src/extractor";
 import {
+  addHisterPdfRequest,
   deleteHisterDocumentRequest,
   getHisterDocument,
   updateHisterLabelRequest,
 } from "../src/hister-client";
+import { backupSqliteDatabase } from "./sqlite-snapshot";
 
 const win = new Window();
-(globalThis as { DOMParser?: typeof DOMParser }).DOMParser = win.DOMParser as unknown as typeof DOMParser;
+(globalThis as { DOMParser?: typeof DOMParser }).DOMParser =
+  win.DOMParser as unknown as typeof DOMParser;
+
+let cleanupSnapshot: (() => Promise<void>) | undefined;
 
 interface BookmarkItem {
   id: number;
@@ -52,7 +62,10 @@ async function pushToHister(options: {
   try {
     const response = await fetch(`${options.histerUrl.replace(/\/$/, "")}/api/add`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders(options.token) },
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(options.token),
+      },
       body: JSON.stringify(payload),
     });
     if (!response.ok) return false;
@@ -61,7 +74,7 @@ async function pushToHister(options: {
         fetch,
         options.histerUrl,
         options.existingUrl,
-        authHeaders(options.token)
+        authHeaders(options.token),
       );
     }
     return true;
@@ -87,16 +100,39 @@ async function main(): Promise<void> {
   console.log("------------------------------------------------------------");
 
   let db: DatabaseSync;
+  let snapshotDirectory: string | undefined;
   try {
-    db = new DatabaseSync(`file:${placesPath}?immutable=1`, { readOnly: true });
+    snapshotDirectory = await mkdtemp(join(tmpdir(), "tab-hister-backfill-"));
+    const snapshotPath = join(snapshotDirectory, "places.sqlite");
+    await backupSqliteDatabase(placesPath, snapshotPath);
+    db = new DatabaseSync(snapshotPath, { readOnly: true });
   } catch (error) {
-    console.error(`[Backfill] Failed to open places.sqlite at ${placesPath}:`, error);
-    process.exit(1);
+    if (snapshotDirectory) {
+      await rm(snapshotDirectory, { recursive: true, force: true });
+    }
+    throw new Error(`Failed to snapshot places.sqlite at ${placesPath}`, {
+      cause: error,
+    });
   }
+  let cleanedUp = false;
+  const cleanup = async (): Promise<void> => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    db.close();
+    await rm(snapshotDirectory, { recursive: true, force: true });
+  };
+  cleanupSnapshot = cleanup;
 
   const roots = db
-    .prepare("SELECT id, parent, title, dateAdded FROM moz_bookmarks WHERE title = 'Tab Stash' AND type = 2")
-    .all() as Array<{ id: number; parent: number; title: string; dateAdded: number }>;
+    .prepare(
+      "SELECT id, parent, title, dateAdded FROM moz_bookmarks WHERE title = 'Tab Stash' AND type = 2",
+    )
+    .all() as Array<{
+    id: number;
+    parent: number;
+    title: string;
+    dateAdded: number;
+  }>;
   const parentStatement = db.prepare("SELECT parent FROM moz_bookmarks WHERE id = ?");
   const rootCandidates = roots.map((root) => {
     let depth = 0;
@@ -117,13 +153,12 @@ async function main(): Promise<void> {
   });
   const root = selectTabStashRoot(rootCandidates);
   if (!root) {
-    console.error("[Backfill] No exact 'Tab Stash' folder found in database!");
-    process.exit(1);
+    throw new Error("No exact 'Tab Stash' folder found in database");
   }
 
   console.log(`[Backfill] Found Tab Stash root folder (ID: ${root.id})`);
   const getChildren = db.prepare(
-    "SELECT b.id, b.type, b.title, b.parent, p.url FROM moz_bookmarks b LEFT JOIN moz_places p ON b.fk = p.id WHERE b.parent = ?"
+    "SELECT b.id, b.type, b.title, b.parent, p.url FROM moz_bookmarks b LEFT JOIN moz_places p ON b.fk = p.id WHERE b.parent = ?",
   );
   const bookmarks: BookmarkItem[] = [];
 
@@ -166,14 +201,14 @@ async function main(): Promise<void> {
       fetch,
       histerUrl,
       item.url,
-      authHeaders(token)
+      authHeaders(token),
     );
     if (existing.legacyUrl && !dryRun) {
       const deleted = await deleteHisterDocumentRequest(
         fetch,
         histerUrl,
         existing.legacyUrl,
-        authHeaders(token)
+        authHeaders(token),
       );
       if (!deleted) {
         console.warn(`${prefix} ⚠ Could not remove duplicate legacy URL`);
@@ -182,6 +217,7 @@ async function main(): Promise<void> {
     const defuddleCurrent =
       existing.metadata.extractor === "defuddle" &&
       existing.metadata.extractor_version === DEFUDDLE_VERSION;
+    const likelyPdf = classifyFetchedContent(item.url, null) === "pdf";
 
     if (!existing.exists && existing.lookupStatus !== 404) {
       console.warn(`${prefix} ✗ Failed to inspect existing Hister document`);
@@ -189,7 +225,7 @@ async function main(): Promise<void> {
       continue;
     }
 
-    if (!existing.exists || !existing.hasText || !defuddleCurrent || force) {
+    if (!existing.exists || !existing.hasText || !defuddleCurrent || likelyPdf || force) {
       console.log(`${prefix} ⚡ Extracting: "${item.title.slice(0, 45)}" -> ${expectedLabel}`);
       if (dryRun) {
         extractedCount++;
@@ -201,7 +237,8 @@ async function main(): Promise<void> {
           headers: {
             "User-Agent":
               "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            Accept:
+              "text/html,application/xhtml+xml,application/pdf,application/xml;q=0.9,*/*;q=0.8",
           },
           signal: AbortSignal.timeout(15_000),
         });
@@ -211,11 +248,55 @@ async function main(): Promise<void> {
           continue;
         }
 
-        const extraction = extractPageContent(
-          await response.text(),
+        const contentKind = classifyFetchedContent(
           item.url,
-          item.title
+          response.headers.get("Content-Type"),
         );
+        if (contentKind === "unsupported") {
+          console.warn(
+            `${prefix} ✗ Unsupported content type: ${response.headers.get("Content-Type") ?? "unknown"}`,
+          );
+          failedCount++;
+          continue;
+        }
+
+        if (contentKind === "pdf") {
+          const result = await addHisterPdfRequest(
+            fetch,
+            histerUrl,
+            {
+              url: existing.exists ? existing.actualUrl : normalizeUrl(item.url),
+              title: item.title,
+              label: expectedLabel,
+              metadata: withoutDefuddleMetadata(existing.metadata),
+            },
+            await response.arrayBuffer(),
+            authHeaders(token),
+          );
+          if (result.ok) {
+            if (existing.matchedLegacyUrl) {
+              await deleteHisterDocumentRequest(
+                fetch,
+                histerUrl,
+                existing.actualUrl,
+                authHeaders(token),
+              );
+            }
+            console.log(`${prefix} ✓ Ingested PDF: "${item.title.slice(0, 40)}"`);
+            extractedCount++;
+          } else {
+            console.warn(`${prefix} ✗ Failed to push PDF to Hister: ${normalizeUrl(item.url)}`);
+            failedCount++;
+          }
+          continue;
+        }
+
+        const extraction = extractPageContent(await response.text(), item.url, item.title);
+        if (existing.exists && existing.hasText && !extraction.extractedByDefuddle) {
+          console.warn(`${prefix} ✗ Defuddle failed; preserving existing Hister content`);
+          failedCount++;
+          continue;
+        }
         const ok = await pushToHister({
           histerUrl,
           rawUrl: item.url,
@@ -228,7 +309,9 @@ async function main(): Promise<void> {
           token,
         });
         if (ok) {
-          console.log(`${prefix} ✓ Ingested: "${extraction.title.slice(0, 40)}" (${extraction.text.length} chars text)`);
+          console.log(
+            `${prefix} ✓ Ingested: "${extraction.title.slice(0, 40)}" (${extraction.text.length} chars text)`,
+          );
           extractedCount++;
         } else {
           console.warn(`${prefix} ✗ Failed to push to Hister: ${normalizeUrl(item.url)}`);
@@ -250,7 +333,7 @@ async function main(): Promise<void> {
         histerUrl,
         existing.actualUrl,
         expectedLabel,
-        authHeaders(token)
+        authHeaders(token),
       );
       if (result.ok) relabeledCount++;
       else failedCount++;
@@ -266,9 +349,16 @@ async function main(): Promise<void> {
   console.log(`  ↻ Relabeled                         : ${relabeledCount}`);
   console.log(`  = Already up to date                : ${upToDateCount}`);
   console.log(`  ✗ Failed                            : ${failedCount}`);
+  await cleanup();
+  cleanupSnapshot = undefined;
 }
 
-main().catch((error: unknown) => {
+main().catch(async (error: unknown) => {
+  try {
+    await cleanupSnapshot?.();
+  } catch (cleanupError) {
+    console.error("[Backfill] Failed to clean up SQLite snapshot:", cleanupError);
+  }
   console.error("[Backfill] Fatal error:", error);
   process.exit(1);
 });
