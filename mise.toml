@@ -28,7 +28,7 @@ run = "docker logs -f hister-dev"
 
 [tasks."tabstash:install"]
 description = "Install dependencies in ../tab-stash"
-run = "npm --prefix ../tab-stash install"
+run = "pnpm -C ../tab-stash install --no-lockfile"
 
 [tasks."tabstash:build"]
 description = "Build the Tab Stash extension in ../tab-stash"
@@ -68,7 +68,7 @@ else
 fi
 
 echo "Launching browser: $BROWSER_BIN"
-npx web-ext run \
+pnpx web-ext run \
   --source-dir . \
   --firefox-binary "$BROWSER_BIN" \
   --firefox-profile ./dev-profile \
