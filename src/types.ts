@@ -17,15 +17,30 @@ export const DEFAULT_CONFIG: BridgeConfig = {
 export interface HisterAddRequest {
   url: string;
   title?: string;
+  text?: string;
+  html?: string;
   label?: string;
-  labels?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface HisterLabelRequest {
+  url: string;
+  label: string;
+}
+
+export interface BackfillProgress {
+  total: number;
+  processed: number;
+  failed: number;
+  inProgress: boolean;
+  message?: string;
 }
 
 export interface HisterSearchResultItem {
   id: string;
   url: string;
   title: string;
-  labels?: string[];
+  label?: string;
   created_at?: string;
 }
 

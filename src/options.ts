@@ -1,4 +1,5 @@
-import { DEFAULT_CONFIG, type BridgeConfig } from "./types";
+import { checkHisterConnection } from "./hister-client";
+import { DEFAULT_CONFIG, type BridgeConfig, type BackfillProgress } from "./types";
 
 const histerUrlInput = document.getElementById("histerUrl") as HTMLInputElement;
 const accessTokenInput = document.getElementById("accessToken") as HTMLInputElement;
@@ -6,6 +7,25 @@ const tagPrefixInput = document.getElementById("tagPrefix") as HTMLInputElement;
 const syncMobileInput = document.getElementById("syncMobile") as HTMLInputElement;
 const saveBtn = document.getElementById("saveBtn") as HTMLButtonElement;
 const statusEl = document.getElementById("status") as HTMLDivElement;
+
+const backfillBtn = document.getElementById("backfillBtn") as HTMLButtonElement;
+const backfillStatusEl = document.getElementById("backfillStatus") as HTMLDivElement;
+const searchStashesLink = document.getElementById("searchStashesLink") as HTMLAnchorElement;
+const openHisterLink = document.getElementById("openHisterLink") as HTMLAnchorElement;
+
+let pollTimer: number | null = null;
+
+function updateQuickLinks(histerUrl: string, tagPrefix: string): void {
+  const baseUrl = histerUrl.replace(/\/$/, "");
+  const prefix = tagPrefix || "stash";
+  if (searchStashesLink) {
+    searchStashesLink.href = `${baseUrl}/?q=label:${encodeURIComponent(prefix)}/*`;
+    searchStashesLink.textContent = `🔍 Search all stashed tabs in Hister (label:${prefix}/*) ↗`;
+  }
+  if (openHisterLink) {
+    openHisterLink.href = baseUrl;
+  }
+}
 
 async function loadSettings(): Promise<void> {
   const stored = await browser.storage.local.get("bridge_config");
@@ -15,6 +35,9 @@ async function loadSettings(): Promise<void> {
   accessTokenInput.value = config.accessToken;
   tagPrefixInput.value = config.tagPrefix;
   syncMobileInput.checked = config.syncMobile;
+
+  updateQuickLinks(config.histerUrl, config.tagPrefix);
+  await checkBackfillStatus();
 }
 
 async function saveSettings(): Promise<void> {
@@ -29,28 +52,97 @@ async function saveSettings(): Promise<void> {
     pollIntervalMinutes: 5,
   };
 
+  updateQuickLinks(newConfig.histerUrl, newConfig.tagPrefix);
+
   try {
     const headers: Record<string, string> = {};
     if (newConfig.accessToken) {
       headers["Authorization"] = `Bearer ${newConfig.accessToken}`;
     }
 
-    const testRes = await fetch(`${newConfig.histerUrl.replace(/\/$/, "")}/api/health`, { headers });
-    if (testRes.ok || testRes.status === 404 || testRes.status === 401) {
-      await browser.storage.local.set({ bridge_config: newConfig });
+    const result = await checkHisterConnection(
+      fetch,
+      newConfig.histerUrl,
+      headers
+    );
+    await browser.storage.local.set({ bridge_config: newConfig });
+    if (!result.reachable) {
+      statusEl.className = "status error";
+      statusEl.textContent = `Could not reach ${newConfig.histerUrl} (saved anyway). Is Hister running?`;
+    } else if (!result.authorized) {
+      statusEl.className = "status error";
+      statusEl.textContent = `Hister rejected the access token (HTTP ${result.status}). Saved config.`;
+    } else if (result.status === 404 || (result.status !== undefined && result.status >= 200 && result.status < 300)) {
       statusEl.className = "status success";
-      statusEl.textContent = "Saved! Successfully reached Hister server.";
+      statusEl.textContent = "Saved! Successfully connected to Hister.";
     } else {
       statusEl.className = "status error";
-      statusEl.textContent = `Server reachable, but returned HTTP ${testRes.status}. Saved config.`;
-      await browser.storage.local.set({ bridge_config: newConfig });
+      statusEl.textContent = `Server reachable, but returned HTTP ${result.status}. Saved config.`;
+    }
+  } catch (error) {
+    statusEl.className = "status error";
+    statusEl.textContent = `Could not save settings: ${
+      error instanceof Error ? error.message : String(error)
+    }`;
+  }
+}
+
+async function checkBackfillStatus(): Promise<void> {
+  try {
+    const res = await browser.runtime.sendMessage({ action: "get_status" });
+    if (res && res.backfill) {
+      renderBackfillProgress(res.backfill);
+    }
+  } catch {
+    // Background service might be initializing
+  }
+}
+
+function renderBackfillProgress(progress: BackfillProgress): void {
+  if (progress.inProgress) {
+    backfillBtn.disabled = true;
+    backfillBtn.textContent = "Syncing in progress...";
+    backfillStatusEl.textContent = progress.message || `Processing (${progress.processed}/${progress.total})...`;
+
+    if (!pollTimer) {
+      pollTimer = window.setInterval(async () => {
+        await checkBackfillStatus();
+      }, 1000);
+    }
+  } else {
+    backfillBtn.disabled = false;
+    backfillBtn.textContent = "Sync & Backfill Stashes";
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+    if (progress.message) {
+      backfillStatusEl.textContent = progress.message;
+    }
+  }
+}
+
+async function triggerBackfill(): Promise<void> {
+  renderBackfillProgress({
+    total: 0,
+    processed: 0,
+    failed: 0,
+    inProgress: true,
+    message: "Scanning bookmarks inside Tab Stash...",
+  });
+
+  try {
+    const res = await browser.runtime.sendMessage({ action: "start_backfill" });
+    if (res && res.progress) {
+      renderBackfillProgress(res.progress);
     }
   } catch (err) {
-    statusEl.className = "status error";
-    statusEl.textContent = `Could not reach ${newConfig.histerUrl} (saved anyway). Is Hister running?`;
-    await browser.storage.local.set({ bridge_config: newConfig });
+    backfillBtn.disabled = false;
+    backfillBtn.textContent = "Sync & Backfill Stashes";
+    backfillStatusEl.textContent = `Error starting backfill: ${err}`;
   }
 }
 
 document.addEventListener("DOMContentLoaded", loadSettings);
 saveBtn.addEventListener("click", saveSettings);
+backfillBtn.addEventListener("click", triggerBackfill);

@@ -10,5 +10,5 @@ export default defineConfig({
   outDir: "dist",
   clean: false,
   sourcemap: true,
-  noExternal: [],
+  noExternal: ["defuddle"],
 });
