@@ -86,7 +86,12 @@ export async function getHisterDocument(
           lookupStatus: response.status,
         };
       }
-      const document = await response.json();
+      const document = (await response.json()) as {
+        url?: unknown;
+        text?: unknown;
+        label?: unknown;
+        metadata?: unknown;
+      };
       let legacyUrl: string | undefined;
       if (candidate === canonicalUrl && canonicalUrl !== rawUrl) {
         try {
@@ -102,7 +107,8 @@ export async function getHisterDocument(
       return {
         exists: true,
         actualUrl: typeof document.url === "string" ? document.url : candidate,
-        hasText: typeof document.text === "string" && document.text.trim().length > 0,
+        hasText:
+          typeof document.text === "string" && document.text.trim().length > 0,
         label: typeof document.label === "string" ? document.label : "",
         metadata:
           document.metadata && typeof document.metadata === "object"
@@ -137,7 +143,9 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   let binary = "";
   const chunkSize = 0x8000;
   for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+    binary += String.fromCharCode(
+      ...bytes.subarray(offset, offset + chunkSize),
+    );
   }
   return btoa(binary);
 }
@@ -150,11 +158,14 @@ export async function addHisterPdfRequest(
   headers: Record<string, string>,
 ): Promise<HisterRequestResult> {
   try {
-    const response = await fetchFn(`${histerUrl.replace(/\/$/, "")}/api/add_pdf`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...headers },
-      body: JSON.stringify({ document, pdf: arrayBufferToBase64(pdf) }),
-    });
+    const response = await fetchFn(
+      `${histerUrl.replace(/\/$/, "")}/api/add_pdf`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...headers },
+        body: JSON.stringify({ document, pdf: arrayBufferToBase64(pdf) }),
+      },
+    );
     return { ok: response.ok, status: response.status };
   } catch {
     return { ok: false };
@@ -169,11 +180,14 @@ export async function deleteHisterDocumentRequest(
 ): Promise<boolean> {
   try {
     const escapedUrl = exactUrl.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-    const response = await fetchFn(`${histerUrl.replace(/\/$/, "")}/api/delete`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...headers },
-      body: JSON.stringify({ query: `url:"${escapedUrl}"` }),
-    });
+    const response = await fetchFn(
+      `${histerUrl.replace(/\/$/, "")}/api/delete`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...headers },
+        body: JSON.stringify({ query: `url:"${escapedUrl}"` }),
+      },
+    );
     return response.ok;
   } catch {
     return false;

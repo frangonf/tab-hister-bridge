@@ -13,17 +13,27 @@ describe("checkHisterConnection", () => {
       .fn<typeof fetch>()
       .mockResolvedValueOnce(new Response("unauthorized", { status: 401 }));
 
-    const result = await checkHisterConnection(fetchFn, "http://127.0.0.1:4433", {
-      Authorization: "Bearer invalid",
-    });
+    const result = await checkHisterConnection(
+      fetchFn,
+      "http://127.0.0.1:4433",
+      {
+        Authorization: "Bearer invalid",
+      },
+    );
 
     expect(result).toEqual({ reachable: true, authorized: false, status: 401 });
   });
 
   it("reports network failures as unreachable", async () => {
-    const fetchFn = vi.fn<typeof fetch>().mockRejectedValueOnce(new TypeError("network down"));
+    const fetchFn = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError("network down"));
 
-    const result = await checkHisterConnection(fetchFn, "http://127.0.0.1:4433", {});
+    const result = await checkHisterConnection(
+      fetchFn,
+      "http://127.0.0.1:4433",
+      {},
+    );
 
     expect(result).toEqual({ reachable: false, authorized: false });
   });
@@ -33,7 +43,11 @@ describe("checkHisterConnection", () => {
       .fn<typeof fetch>()
       .mockResolvedValueOnce(new Response("not found", { status: 404 }));
 
-    const result = await checkHisterConnection(fetchFn, "http://127.0.0.1:4433/", {});
+    const result = await checkHisterConnection(
+      fetchFn,
+      "http://127.0.0.1:4433/",
+      {},
+    );
 
     expect(result).toEqual({ reachable: true, authorized: true, status: 404 });
   });

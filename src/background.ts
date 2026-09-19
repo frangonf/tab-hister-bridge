@@ -52,18 +52,24 @@ let currentBackfill: BackfillProgress = {
 let backfillPromise: Promise<BackfillProgress> | null = null;
 
 function authHeaders(): Record<string, string> {
-  return config.accessToken ? { Authorization: `Bearer ${config.accessToken}` } : {};
+  return config.accessToken
+    ? { Authorization: `Bearer ${config.accessToken}` }
+    : {};
 }
 
 async function loadState(): Promise<void> {
   try {
-    const stored = await browser.storage.local.get(["bridge_config", PREVIOUS_LABELS_KEY]);
+    const stored = await browser.storage.local.get([
+      "bridge_config",
+      PREVIOUS_LABELS_KEY,
+    ]);
     config = {
       ...DEFAULT_CONFIG,
       ...(stored.bridge_config as Partial<BridgeConfig> | undefined),
     };
     previousLabels =
-      stored[PREVIOUS_LABELS_KEY] && typeof stored[PREVIOUS_LABELS_KEY] === "object"
+      stored[PREVIOUS_LABELS_KEY] &&
+      typeof stored[PREVIOUS_LABELS_KEY] === "object"
         ? { ...(stored[PREVIOUS_LABELS_KEY] as Record<string, string>) }
         : {};
   } catch (error) {
@@ -79,7 +85,9 @@ function invalidateTabStashRoot(): void {
   tabStashRootId = null;
 }
 
-async function bookmarkDepth(node: browser.bookmarks.BookmarkTreeNode): Promise<number> {
+async function bookmarkDepth(
+  node: browser.bookmarks.BookmarkTreeNode,
+): Promise<number> {
   let depth = 0;
   let parentId = node.parentId;
   while (parentId) {
@@ -105,7 +113,9 @@ export async function findTabStashRoot(): Promise<string | null> {
 
   try {
     const results = await browser.bookmarks.search({ title: "Tab Stash" });
-    const folders = results.filter((item) => !item.url && item.title === "Tab Stash");
+    const folders = results.filter(
+      (item) => !item.url && item.title === "Tab Stash",
+    );
     const candidates = await Promise.all(
       folders.map(async (item) => ({
         id: item.id,
@@ -197,25 +207,28 @@ function unmarkPendingMobileUrl(rawUrl: string): void {
   consumePendingMobileUrl(rawUrl);
 }
 
-type FetchedPageContent = { kind: "html"; html: string } | { kind: "pdf"; bytes: ArrayBuffer };
+type FetchedPageContent =
+  { kind: "html"; html: string } | { kind: "pdf"; bytes: ArrayBuffer };
 
-async function fetchPageContent(rawUrl: string): Promise<FetchedPageContent | null> {
+async function fetchPageContent(
+  rawUrl: string,
+): Promise<FetchedPageContent | null> {
   const urlLooksLikePdf = classifyFetchedContent(rawUrl, null) === "pdf";
   if (!urlLooksLikePdf) {
-  try {
-    const tabs = await browser.tabs.query({ url: rawUrl });
-    for (const tab of tabs) {
-      if (tab.id && tab.status === "complete") {
-        try {
-          const results = await browser.scripting.executeScript({
-            target: { tabId: tab.id },
+    try {
+      const tabs = await browser.tabs.query({ url: rawUrl });
+      for (const tab of tabs) {
+        if (tab.id && tab.status === "complete") {
+          try {
+            const results = await browser.scripting.executeScript({
+              target: { tabId: tab.id },
               func: () =>
                 JSON.stringify({
                   html: document.documentElement.outerHTML,
                   contentType: document.contentType,
                 }) as unknown as void,
-          });
-          if (typeof results?.[0]?.result === "string") {
+            });
+            if (typeof results?.[0]?.result === "string") {
               const page = JSON.parse(results[0].result) as {
                 html?: unknown;
                 contentType?: unknown;
@@ -224,31 +237,37 @@ async function fetchPageContent(rawUrl: string): Promise<FetchedPageContent | nu
                 typeof page.html === "string" &&
                 classifyFetchedContent(
                   rawUrl,
-                  typeof page.contentType === "string" ? page.contentType : null,
+                  typeof page.contentType === "string"
+                    ? page.contentType
+                    : null,
                 ) === "html"
               ) {
                 return { kind: "html", html: page.html };
               }
+            }
+          } catch {
+            // Privileged pages cannot be scripted; use the network fallback.
           }
-        } catch {
-          // Privileged pages cannot be scripted; use the network fallback.
         }
       }
+    } catch {
+      // An invalid tab match pattern should not prevent the network fallback.
     }
-  } catch {
-    // An invalid tab match pattern should not prevent the network fallback.
-  }
   }
 
   try {
     const response = await fetch(rawUrl, {
       headers: {
-        Accept: "text/html,application/xhtml+xml,application/pdf,application/xml;q=0.9,*/*;q=0.8",
+        Accept:
+          "text/html,application/xhtml+xml,application/pdf,application/xml;q=0.9,*/*;q=0.8",
       },
       signal: AbortSignal.timeout(12_000),
     });
     if (!response.ok) return null;
-    const kind = classifyFetchedContent(rawUrl, response.headers.get("Content-Type"));
+    const kind = classifyFetchedContent(
+      rawUrl,
+      response.headers.get("Content-Type"),
+    );
     if (kind === "pdf") {
       return { kind, bytes: await response.arrayBuffer() };
     }
@@ -265,8 +284,15 @@ async function fetchPageContent(rawUrl: string): Promise<FetchedPageContent | nu
   }
 }
 
-export async function getHisterDocumentStatus(rawUrl: string): Promise<HisterDocumentStatus> {
-  const status = await getHisterDocument(fetch, config.histerUrl, rawUrl, authHeaders());
+export async function getHisterDocumentStatus(
+  rawUrl: string,
+): Promise<HisterDocumentStatus> {
+  const status = await getHisterDocument(
+    fetch,
+    config.histerUrl,
+    rawUrl,
+    authHeaders(),
+  );
   if (status.legacyUrl) {
     const deleted = await deleteHisterDocumentRequest(
       fetch,
@@ -275,7 +301,9 @@ export async function getHisterDocumentStatus(rawUrl: string): Promise<HisterDoc
       authHeaders(),
     );
     if (!deleted) {
-      console.warn(`[Bridge] Could not remove duplicate legacy identity ${status.legacyUrl}`);
+      console.warn(
+        `[Bridge] Could not remove duplicate legacy identity ${status.legacyUrl}`,
+      );
     }
   }
   return status;
@@ -293,7 +321,9 @@ export async function updateHisterLabel(
     authHeaders(),
   );
   if (result.ok) {
-    console.log(`[Bridge] Updated label for ${result.actualUrl} -> "${newLabel}"`);
+    console.log(
+      `[Bridge] Updated label for ${result.actualUrl} -> "${newLabel}"`,
+    );
   } else if (result.status !== 404) {
     console.warn(
       `[Bridge] Failed to update label for ${rawUrl}: ${result.status ?? "network error"}`,
@@ -312,7 +342,9 @@ export async function pushToHister(
 
   const status = knownStatus ?? (await getHisterDocumentStatus(rawUrl));
   if (!status.exists && status.lookupStatus !== 404) {
-    console.warn(`[Bridge] Cannot inspect existing Hister document for ${rawUrl}`);
+    console.warn(
+      `[Bridge] Cannot inspect existing Hister document for ${rawUrl}`,
+    );
     return false;
   }
   const label = computeStashLabel(folderPath);
@@ -320,7 +352,9 @@ export async function pushToHister(
 
   const fetched = await fetchPageContent(rawUrl);
   const extraction =
-    fetched?.kind === "html" ? extractPageContent(fetched.html, rawUrl, title) : null;
+    fetched?.kind === "html"
+      ? extractPageContent(fetched.html, rawUrl, title)
+      : null;
   if (
     !shouldSubmitFetchedContent(
       status.exists && status.hasText,
@@ -375,11 +409,16 @@ export async function pushToHister(
       });
       responseStatus = response.status;
       if (!response.ok) {
-        console.warn(`[Bridge] Hister API returned ${response.status} for ${rawUrl}`);
+        console.warn(
+          `[Bridge] Hister API returned ${response.status} for ${rawUrl}`,
+        );
         return false;
       }
     } catch (error) {
-      console.error(`[Bridge] Network error sending to Hister (${config.histerUrl}):`, error);
+      console.error(
+        `[Bridge] Network error sending to Hister (${config.histerUrl}):`,
+        error,
+      );
       return false;
     }
   }
@@ -433,7 +472,10 @@ async function restorePreviousLabel(item: StashBookmark): Promise<boolean> {
   const canonicalUrl = normalizeUrl(item.url);
   if ((stashUrlCounts.get(canonicalUrl) ?? 0) > 0) return true;
 
-  const label = Object.prototype.hasOwnProperty.call(previousLabels, canonicalUrl)
+  const label = Object.prototype.hasOwnProperty.call(
+    previousLabels,
+    canonicalUrl,
+  )
     ? previousLabels[canonicalUrl]
     : "";
   const result = await updateHisterLabel(item.url, label);
@@ -462,7 +504,11 @@ async function collectSubtreeBookmarks(
         });
       }
     } else {
-      await collectSubtreeBookmarks(child.id, [...folderPath, child.title], target);
+      await collectSubtreeBookmarks(
+        child.id,
+        [...folderPath, child.title],
+        target,
+      );
     }
   }
 }
@@ -476,7 +522,9 @@ export async function collectTabStashBookmarks(): Promise<StashBookmark[]> {
 }
 
 async function currentStashMap(): Promise<Map<string, StashBookmark>> {
-  return new Map((await collectTabStashBookmarks()).map((item) => [item.id, item]));
+  return new Map(
+    (await collectTabStashBookmarks()).map((item) => [item.id, item]),
+  );
 }
 
 async function ensureSnapshot(): Promise<void> {
@@ -517,8 +565,8 @@ function enqueueBookmarkTask(task: () => Promise<void>): Promise<void> {
 }
 
 function registerBookmarkListeners(): void {
-  browser.bookmarks.onCreated.addListener((id, bookmark) =>
-    enqueueBookmarkTask(async () => {
+  browser.bookmarks.onCreated.addListener((id, bookmark) => {
+    void enqueueBookmarkTask(async () => {
       await ensureSnapshot();
       if (!bookmark.url) {
         if (bookmark.title === "Tab Stash") {
@@ -535,16 +583,26 @@ function registerBookmarkListeners(): void {
         folderPath: location.path,
       };
       if (consumePendingMobileUrl(bookmark.url)) {
-        stashSnapshot = updateStashSnapshot(stashSnapshot, item, undefined, stashUrlCounts);
+        stashSnapshot = updateStashSnapshot(
+          stashSnapshot,
+          item,
+          undefined,
+          stashUrlCounts,
+        );
         return;
       }
       await pushToHister(bookmark.url, bookmark.title, location.path);
-      stashSnapshot = updateStashSnapshot(stashSnapshot, item, undefined, stashUrlCounts);
-    }),
-  );
+      stashSnapshot = updateStashSnapshot(
+        stashSnapshot,
+        item,
+        undefined,
+        stashUrlCounts,
+      );
+    });
+  });
 
-  browser.bookmarks.onMoved.addListener((id, moveInfo) =>
-    enqueueBookmarkTask(async () => {
+  browser.bookmarks.onMoved.addListener((id, moveInfo) => {
+    void enqueueBookmarkTask(async () => {
       await ensureSnapshot();
       const [node] = await browser.bookmarks.get(id);
       if (!node) return;
@@ -565,21 +623,31 @@ function registerBookmarkListeners(): void {
       const action = classifyStashMove(oldLocation.inside, newLocation.inside);
       if (action === "apply" && isSupportedPageUrl(item.url)) {
         await applyStashLabel(item);
-        stashSnapshot = updateStashSnapshot(stashSnapshot, item, undefined, stashUrlCounts);
+        stashSnapshot = updateStashSnapshot(
+          stashSnapshot,
+          item,
+          undefined,
+          stashUrlCounts,
+        );
       } else if (action === "restore") {
         const previous = stashSnapshot.get(id) ?? {
           ...item,
           folderPath: oldLocation.path,
         };
-        const current = updateStashSnapshot(stashSnapshot, null, id, stashUrlCounts);
+        const current = updateStashSnapshot(
+          stashSnapshot,
+          null,
+          id,
+          stashUrlCounts,
+        );
         await restorePreviousLabel(previous);
         stashSnapshot = current;
       }
-    }),
-  );
+    });
+  });
 
-  browser.bookmarks.onChanged.addListener((id) =>
-    enqueueBookmarkTask(async () => {
+  browser.bookmarks.onChanged.addListener((id) => {
+    void enqueueBookmarkTask(async () => {
       await ensureSnapshot();
       const [node] = await browser.bookmarks.get(id);
       if (!node) return;
@@ -604,7 +672,9 @@ function registerBookmarkListeners(): void {
           : updateStashSnapshot(stashSnapshot, null, id, stashUrlCounts);
       if (
         old &&
-        (normalizeUrl(old.url) !== normalizeUrl(node.url) || !location.inside || !supported)
+        (normalizeUrl(old.url) !== normalizeUrl(node.url) ||
+          !location.inside ||
+          !supported)
       ) {
         await restorePreviousLabel(old);
       }
@@ -612,23 +682,28 @@ function registerBookmarkListeners(): void {
         await pushToHister(node.url, node.title, location.path);
       }
       stashSnapshot = current;
-    }),
-  );
+    });
+  });
 
-  browser.bookmarks.onRemoved.addListener((id, removeInfo) =>
-    enqueueBookmarkTask(async () => {
+  browser.bookmarks.onRemoved.addListener((id, removeInfo) => {
+    void enqueueBookmarkTask(async () => {
       await ensureSnapshot();
       const old = stashSnapshot.get(id);
       if (old) {
-        const current = updateStashSnapshot(stashSnapshot, null, id, stashUrlCounts);
+        const current = updateStashSnapshot(
+          stashSnapshot,
+          null,
+          id,
+          stashUrlCounts,
+        );
         await restorePreviousLabel(old);
         stashSnapshot = current;
       } else if (!removeInfo.node.url) {
         // A folder removal can remove many cached descendants in one event.
         await reconcileStashTree();
       }
-    }),
-  );
+    });
+  });
 }
 
 export async function runBackfill(): Promise<BackfillProgress> {
@@ -664,8 +739,18 @@ export async function runBackfill(): Promise<BackfillProgress> {
         let ok: boolean;
         if (!status.exists && status.lookupStatus !== 404) {
           ok = false;
-        } else if (!status.exists || !status.hasText || !defuddleCurrent || likelyPdf) {
-          ok = await pushToHister(item.url, item.title, item.folderPath, status);
+        } else if (
+          !status.exists ||
+          !status.hasText ||
+          !defuddleCurrent ||
+          likelyPdf
+        ) {
+          ok = await pushToHister(
+            item.url,
+            item.title,
+            item.folderPath,
+            status,
+          );
         } else {
           await rememberPreviousLabel(item.url, status, targetLabel);
           ok = shouldUpdateLabel(status.label, targetLabel)
@@ -708,7 +793,9 @@ async function syncMobileStashes(): Promise<void> {
     if (items.length === 0) return;
 
     const existing = await browser.bookmarks.getChildren(rootId);
-    let mobileInbox = existing.find((child) => child.title === "Mobile Inbox" && !child.url);
+    let mobileInbox = existing.find(
+      (child) => child.title === "Mobile Inbox" && !child.url,
+    );
     if (!mobileInbox) {
       mobileInbox = await browser.bookmarks.create({
         parentId: rootId,
@@ -781,7 +868,9 @@ browser.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "poll_mobile_stashes") {
     void startup
       .then(() => syncMobileStashes())
-      .catch((error) => console.error("[Bridge] Mobile sync could not start:", error));
+      .catch((error) =>
+        console.error("[Bridge] Mobile sync could not start:", error),
+      );
   }
 });
 
@@ -791,7 +880,7 @@ browser.storage.onChanged.addListener((changes, area) => {
       ...DEFAULT_CONFIG,
       ...(changes.bridge_config.newValue as Partial<BridgeConfig>),
     };
-    browser.alarms.create("poll_mobile_stashes", {
+    void browser.alarms.create("poll_mobile_stashes", {
       periodInMinutes: config.pollIntervalMinutes,
     });
   }
@@ -800,10 +889,12 @@ browser.storage.onChanged.addListener((changes, area) => {
 const startup = loadState().then(async () => {
   registerBookmarkListeners();
   await ensureSnapshot();
-  browser.alarms.create("poll_mobile_stashes", {
+  void browser.alarms.create("poll_mobile_stashes", {
     periodInMinutes: config.pollIntervalMinutes,
   });
-  console.log("[Bridge] Extension initialized and listening for Tab Stash bookmarks.");
+  console.log(
+    "[Bridge] Extension initialized and listening for Tab Stash bookmarks.",
+  );
   await syncMobileStashes();
 });
 

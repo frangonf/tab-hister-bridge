@@ -24,13 +24,7 @@
     "default_title": "Tab Stash ↔ Hister Bridge",
     "default_popup": "src/options.html"
   },
-  "permissions": [
-    "bookmarks",
-    "storage",
-    "alarms",
-    "tabs",
-    "scripting"
-  ],
+  "permissions": ["bookmarks", "storage", "alarms", "tabs", "scripting"],
   "host_permissions": [
     "http://127.0.0.1:4433/*",
     "http://localhost:4433/*",

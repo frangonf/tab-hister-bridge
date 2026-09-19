@@ -1,0 +1,6 @@
+sdk/
+node_modules/
+dagger.gen.ts
+.env
+/**/node_modules/**
+/**/.pnpm-store/**

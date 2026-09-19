@@ -12,7 +12,11 @@ import {
   selectTabStashRoot,
   withoutDefuddleMetadata,
 } from "../src/bridge-core";
-import { DEFUDDLE_VERSION, extractPageContent, type ExtractedPage } from "../src/extractor";
+import {
+  DEFUDDLE_VERSION,
+  extractPageContent,
+  type ExtractedPage,
+} from "../src/extractor";
 import {
   addHisterPdfRequest,
   deleteHisterDocumentRequest,
@@ -60,14 +64,17 @@ async function pushToHister(options: {
   if (options.existingUrl) payload.url = options.existingUrl;
 
   try {
-    const response = await fetch(`${options.histerUrl.replace(/\/$/, "")}/api/add`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...authHeaders(options.token),
+    const response = await fetch(
+      `${options.histerUrl.replace(/\/$/, "")}/api/add`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(options.token),
+        },
+        body: JSON.stringify(payload),
       },
-      body: JSON.stringify(payload),
-    });
+    );
     if (!response.ok) return false;
     if (options.matchedLegacyUrl && options.existingUrl) {
       await deleteHisterDocumentRequest(
@@ -95,8 +102,10 @@ async function main(): Promise<void> {
   console.log(`[Backfill] Target Hister URL : ${histerUrl}`);
   console.log(`[Backfill] Database path     : ${placesPath}`);
   console.log(`[Backfill] Tag prefix        : ${tagPrefix}`);
-  if (force) console.log("[Backfill] Mode              : FORCE (re-extracting all)");
-  if (dryRun) console.log("[Backfill] Mode              : DRY RUN (no modifications)");
+  if (force)
+    console.log("[Backfill] Mode              : FORCE (re-extracting all)");
+  if (dryRun)
+    console.log("[Backfill] Mode              : DRY RUN (no modifications)");
   console.log("------------------------------------------------------------");
 
   let db: DatabaseSync;
@@ -133,7 +142,9 @@ async function main(): Promise<void> {
     title: string;
     dateAdded: number;
   }>;
-  const parentStatement = db.prepare("SELECT parent FROM moz_bookmarks WHERE id = ?");
+  const parentStatement = db.prepare(
+    "SELECT parent FROM moz_bookmarks WHERE id = ?",
+  );
   const rootCandidates = roots.map((root) => {
     let depth = 0;
     let parent = root.parent;
@@ -225,8 +236,16 @@ async function main(): Promise<void> {
       continue;
     }
 
-    if (!existing.exists || !existing.hasText || !defuddleCurrent || likelyPdf || force) {
-      console.log(`${prefix} ⚡ Extracting: "${item.title.slice(0, 45)}" -> ${expectedLabel}`);
+    if (
+      !existing.exists ||
+      !existing.hasText ||
+      !defuddleCurrent ||
+      likelyPdf ||
+      force
+    ) {
+      console.log(
+        `${prefix} ⚡ Extracting: "${item.title.slice(0, 45)}" -> ${expectedLabel}`,
+      );
       if (dryRun) {
         extractedCount++;
         continue;
@@ -243,7 +262,9 @@ async function main(): Promise<void> {
           signal: AbortSignal.timeout(15_000),
         });
         if (!response.ok) {
-          console.warn(`${prefix} ⚠️  HTTP ${response.status} fetching ${item.url}`);
+          console.warn(
+            `${prefix} ⚠️  HTTP ${response.status} fetching ${item.url}`,
+          );
           failedCount++;
           continue;
         }
@@ -265,7 +286,9 @@ async function main(): Promise<void> {
             fetch,
             histerUrl,
             {
-              url: existing.exists ? existing.actualUrl : normalizeUrl(item.url),
+              url: existing.exists
+                ? existing.actualUrl
+                : normalizeUrl(item.url),
               title: item.title,
               label: expectedLabel,
               metadata: withoutDefuddleMetadata(existing.metadata),
@@ -282,18 +305,32 @@ async function main(): Promise<void> {
                 authHeaders(token),
               );
             }
-            console.log(`${prefix} ✓ Ingested PDF: "${item.title.slice(0, 40)}"`);
+            console.log(
+              `${prefix} ✓ Ingested PDF: "${item.title.slice(0, 40)}"`,
+            );
             extractedCount++;
           } else {
-            console.warn(`${prefix} ✗ Failed to push PDF to Hister: ${normalizeUrl(item.url)}`);
+            console.warn(
+              `${prefix} ✗ Failed to push PDF to Hister: ${normalizeUrl(item.url)}`,
+            );
             failedCount++;
           }
           continue;
         }
 
-        const extraction = extractPageContent(await response.text(), item.url, item.title);
-        if (existing.exists && existing.hasText && !extraction.extractedByDefuddle) {
-          console.warn(`${prefix} ✗ Defuddle failed; preserving existing Hister content`);
+        const extraction = extractPageContent(
+          await response.text(),
+          item.url,
+          item.title,
+        );
+        if (
+          existing.exists &&
+          existing.hasText &&
+          !extraction.extractedByDefuddle
+        ) {
+          console.warn(
+            `${prefix} ✗ Defuddle failed; preserving existing Hister content`,
+          );
           failedCount++;
           continue;
         }
@@ -314,7 +351,9 @@ async function main(): Promise<void> {
           );
           extractedCount++;
         } else {
-          console.warn(`${prefix} ✗ Failed to push to Hister: ${normalizeUrl(item.url)}`);
+          console.warn(
+            `${prefix} ✗ Failed to push to Hister: ${normalizeUrl(item.url)}`,
+          );
           failedCount++;
         }
       } catch (error) {
@@ -323,7 +362,9 @@ async function main(): Promise<void> {
         failedCount++;
       }
     } else if (existing.label !== expectedLabel) {
-      console.log(`${prefix} ↻ Relabeling: "${item.title.slice(0, 45)}" -> ${expectedLabel}`);
+      console.log(
+        `${prefix} ↻ Relabeling: "${item.title.slice(0, 45)}" -> ${expectedLabel}`,
+      );
       if (dryRun) {
         relabeledCount++;
         continue;
@@ -357,7 +398,10 @@ main().catch(async (error: unknown) => {
   try {
     await cleanupSnapshot?.();
   } catch (cleanupError) {
-    console.error("[Backfill] Failed to clean up SQLite snapshot:", cleanupError);
+    console.error(
+      "[Backfill] Failed to clean up SQLite snapshot:",
+      cleanupError,
+    );
   }
   console.error("[Backfill] Fatal error:", error);
   process.exit(1);
