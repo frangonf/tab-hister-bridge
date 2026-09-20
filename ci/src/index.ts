@@ -20,6 +20,10 @@ const CHECK_STEPS: readonly CheckStep[] = [
       "lint",
       "--source-dir",
       ".",
+      // The extension is self-distributed (unlisted, GitHub Releases) and
+      // declares a custom gecko.update_url, which is only valid when
+      // self-hosted.
+      "--self-hosted",
       "--ignore-files",
       "dev-profile/**",
       "dev-data/**",
@@ -50,8 +54,8 @@ const CHECK_STEPS: readonly CheckStep[] = [
   { name: "audit-signatures", command: ["pnpm", "audit", "signatures"] },
 ];
 
-// The extension zip only needs manifest.json, dist/ (fresh build) and icons/;
-// everything else is development scaffolding.
+// Exclude development and reviewer scaffolding while retaining the manifest,
+// generated bundles, icons, options page, license, and privacy policy.
 const PACKAGE_IGNORES = [
   "dev-profile",
   "dev-profile/**",
@@ -74,6 +78,7 @@ const PACKAGE_IGNORES = [
   "bin",
   "bin/**",
   "README.md",
+  "AMO_SOURCE_README.md",
   "mise.toml",
   "mise.lock",
   "package.json",
@@ -99,6 +104,23 @@ const SOURCE_EXCLUDES = [
   "ci/sdk",
 ];
 
+// AMO names the signed artifact after the add-on and version
+// (e.g. tab_stash_hister_bridge-0.1.0.xpi); normalize it so release
+// automation can export it under a stable name.
+const SIGNED_ARTIFACT = "tab-hister-bridge-signed.xpi";
+const SOURCE_ARTIFACT = "tab-hister-bridge-source.zip";
+const SOURCE_ARCHIVE_IGNORES = [
+  ".git/*",
+  ".mise/*",
+  "node_modules/*",
+  "dist/*",
+  "dev-profile/*",
+  "dev-data/*",
+  "web-ext-artifacts/*",
+  "ci/node_modules/*",
+  "ci/sdk/*",
+];
+
 @object()
 export class Ci {
   private nodeBase(source: Directory) {
@@ -122,6 +144,7 @@ export class Ci {
         "curl",
         "libatomic1",
         "libsqlite3-0",
+        "zip",
       ])
       .withExec(["sh", "-c", "rm -rf /var/lib/apt/lists/*"])
       .withExec(["mkdir", "-p", "/app"])
@@ -213,5 +236,54 @@ export class Ci {
       ...PACKAGE_IGNORES,
     ]);
     return container.file("/app/web-ext-artifacts/tab-hister-bridge.zip");
+  }
+
+  // Signs the extension as an unlisted add-on via the Mozilla Add-ons API,
+  // producing a .xpi that Firefox installs permanently when downloaded from
+  // a GitHub Release. Credentials are injected as Dagger secrets and never
+  // appear in container env logs.
+  @func()
+  sign(source: Directory, apiKey: Secret, apiSecret: Secret): File {
+    const build = this.nodeBase(source)
+      .withExec(["pnpm", "run", "build"])
+      .withExec(["mkdir", "-p", "web-ext-artifacts"])
+      .withExec([
+        "zip",
+        "-q",
+        "-r",
+        `web-ext-artifacts/${SOURCE_ARTIFACT}`,
+        ".",
+        "-x",
+        ...SOURCE_ARCHIVE_IGNORES,
+      ]);
+    const container = build
+      .withSecretVariable("WEB_EXT_API_KEY", apiKey)
+      .withSecretVariable("WEB_EXT_API_SECRET", apiSecret)
+      .withExec([
+        "pnpm",
+        "exec",
+        "web-ext",
+        "sign",
+        "--source-dir",
+        ".",
+        "--artifacts-dir",
+        "web-ext-artifacts",
+        "--channel",
+        "unlisted",
+        "--timeout",
+        "900000",
+        "--upload-source-code",
+        `web-ext-artifacts/${SOURCE_ARTIFACT}`,
+        "--ignore-files",
+        ...PACKAGE_IGNORES,
+      ])
+      .withoutSecretVariable("WEB_EXT_API_KEY")
+      .withoutSecretVariable("WEB_EXT_API_SECRET")
+      .withExec([
+        "sh",
+        "-c",
+        `mv web-ext-artifacts/*.xpi web-ext-artifacts/${SIGNED_ARTIFACT}`,
+      ]);
+    return container.file(`/app/web-ext-artifacts/${SIGNED_ARTIFACT}`);
   }
 }

@@ -1,0 +1,285 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false # never cancel an in-flight signing/release
+
+jobs:
+  check:
+    name: Project checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read # checkout supplies the source tree to Dagger
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run Dagger checks
+        uses: dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77 # v8.4.1
+        with:
+          version: "v0.21.9"
+          module: "ci"
+          call: check --source=.
+
+  package:
+    name: Package extension
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read # checkout supplies the source tree to Dagger
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Read manifest version
+        id: version
+        run: |
+          version="$(jq -r '.version' manifest.json)"
+          if [ -z "$version" ] || [ "$version" = "null" ]; then
+            echo "::error::manifest.json has no version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag matches manifest version
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        env:
+          MANIFEST_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          if [ "$tag_version" != "$MANIFEST_VERSION" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match manifest.json version $MANIFEST_VERSION"
+            exit 1
+          fi
+
+      - name: Verify tag belongs to main
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Release tag $GITHUB_REF_NAME does not point to a commit on main"
+            exit 1
+          fi
+
+      - name: Build extension zip
+        uses: dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77 # v8.4.1
+        with:
+          version: "v0.21.9"
+          module: "ci"
+          call: package --source=. export --path=web-ext-artifacts/tab-hister-bridge-${{ steps.version.outputs.version }}.zip
+
+      - name: Generate unsigned checksums
+        run: |
+          cd web-ext-artifacts
+          sha256sum -- *.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload unsigned package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-package-${{ steps.version.outputs.version }}
+          path: web-ext-artifacts/*
+          if-no-files-found: error
+          retention-days: 30
+
+  sign:
+    name: Sign extension
+    needs: package
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: read # checkout supplies only the tagged source to Dagger
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Fail before running third-party code if this production release cannot
+      # be signed. Unsigned test packages come from workflow_dispatch instead.
+      - name: Require AMO credentials
+        env:
+          AMO_API_KEY: ${{ secrets.AMO_API_KEY }}
+          AMO_API_SECRET: ${{ secrets.AMO_API_SECRET }}
+        run: |
+          if [ -z "$AMO_API_KEY" ] || [ -z "$AMO_API_SECRET" ]; then
+            echo "::error::The protected release environment must provide AMO_API_KEY and AMO_API_SECRET"
+            exit 1
+          fi
+
+      # Install Dagger before exposing AMO credentials. The pinned composite
+      # action otherwise downloads its installer inside the secret-bearing step.
+      - name: Set up Dagger
+        uses: dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77 # v8.4.1
+        with:
+          version: "v0.21.9"
+
+      - name: Sign extension (unlisted XPI)
+        uses: dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77 # v8.4.1
+        env:
+          AMO_API_KEY: ${{ secrets.AMO_API_KEY }}
+          AMO_API_SECRET: ${{ secrets.AMO_API_SECRET }}
+        with:
+          version: "v0.21.9"
+          module: "ci"
+          call: sign --source=. --api-key=env:AMO_API_KEY --api-secret=env:AMO_API_SECRET export --path=web-ext-artifacts/tab-hister-bridge-${{ needs.package.outputs.version }}.xpi
+
+      - name: Upload signed extension
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: signed-extension-${{ needs.package.outputs.version }}
+          path: web-ext-artifacts/*.xpi
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish GitHub release
+    needs: [package, sign]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # create, validate, and publish the release
+    steps:
+      - name: Download unsigned package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-package-${{ needs.package.outputs.version }}
+          path: web-ext-artifacts
+
+      - name: Download signed extension
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: signed-extension-${{ needs.package.outputs.version }}
+          path: web-ext-artifacts
+
+      - name: Generate checksums and update manifest
+        env:
+          ADDON_ID: tab-hister-bridge@frangonf.com
+          VERSION: ${{ needs.package.outputs.version }}
+        run: |
+          cd web-ext-artifacts
+          : > SHA256SUMS.txt
+          sha256sum -- *.zip *.xpi >> SHA256SUMS.txt
+
+          xpi="tab-hister-bridge-${VERSION}.xpi"
+          hash="sha256:$(sha256sum -- "$xpi" | cut -d' ' -f1)"
+          link="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${xpi}"
+          jq -n \
+            --arg id "$ADDON_ID" \
+            --arg version "$VERSION" \
+            --arg link "$link" \
+            --arg hash "$hash" \
+            '{addons: {($id): {updates: [{version: $version, update_link: $link, update_hash: $hash}]}}}' \
+            > updates.json
+
+          cat SHA256SUMS.txt
+          cat updates.json
+
+      - name: Prepare draft release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            is_draft="$(gh release view "$tag" --json isDraft --jq '.isDraft')"
+          else
+            gh release create "$tag" --draft --verify-tag --title "$tag" --generate-notes
+            is_draft="true"
+          fi
+
+          echo "needs_publish=$is_draft" >> "$GITHUB_OUTPUT"
+          if [ "$is_draft" = "true" ]; then
+            gh release upload "$tag" web-ext-artifacts/* --clobber
+          fi
+
+      - name: Validate release assets
+        env:
+          ADDON_ID: tab-hister-bridge@frangonf.com
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.package.outputs.version }}
+        run: |
+          rm -rf release-validation
+          mkdir release-validation
+          gh release download "$GITHUB_REF_NAME" --dir release-validation --clobber
+
+          diff -u \
+            <(find web-ext-artifacts -maxdepth 1 -type f -exec basename {} \; | sort) \
+            <(find release-validation -maxdepth 1 -type f -exec basename {} \; | sort)
+          for asset in web-ext-artifacts/*; do
+            cmp "$asset" "release-validation/$(basename "$asset")"
+          done
+
+          (
+            cd release-validation
+            sha256sum --check SHA256SUMS.txt
+          )
+
+          xpi="release-validation/tab-hister-bridge-${VERSION}.xpi"
+          hash="sha256:$(sha256sum -- "$xpi" | cut -d' ' -f1)"
+          link="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/tab-hister-bridge-${VERSION}.xpi"
+          jq -e \
+            --arg id "$ADDON_ID" \
+            --arg version "$VERSION" \
+            --arg link "$link" \
+            --arg hash "$hash" \
+            '.addons[$id].updates == [{version: $version, update_link: $link, update_hash: $hash}]' \
+            release-validation/updates.json >/dev/null
+          unzip -p "$xpi" manifest.json | jq -e \
+            --arg id "$ADDON_ID" \
+            --arg version "$VERSION" \
+            '.version == $version and .browser_specific_settings.gecko.id == $id' >/dev/null
+
+      - name: Publish release
+        if: steps.release.outputs.needs_publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+
+      - name: Smoke-test public update channel
+        env:
+          VERSION: ${{ needs.package.outputs.version }}
+        run: |
+          update_url="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/updates.json"
+          matched="false"
+          for attempt in {1..20}; do
+            if curl --fail --location --silent --show-error "$update_url" -o public-updates.json && \
+               cmp public-updates.json web-ext-artifacts/updates.json; then
+              matched="true"
+              break
+            fi
+            echo "Waiting for the latest-release redirect (attempt $attempt/20)"
+            sleep 5
+          done
+          if [ "$matched" != "true" ]; then
+            echo "::error::The public update manifest does not match the release"
+            exit 1
+          fi
+
+          xpi_url="$(jq -r --arg id 'tab-hister-bridge@frangonf.com' '.addons[$id].updates[0].update_link' public-updates.json)"
+          expected_hash="$(jq -r --arg id 'tab-hister-bridge@frangonf.com' '.addons[$id].updates[0].update_hash' public-updates.json)"
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error "$xpi_url" -o public-extension.xpi
+          actual_hash="sha256:$(sha256sum -- public-extension.xpi | cut -d' ' -f1)"
+          if [ "$actual_hash" != "$expected_hash" ]; then
+            echo "::error::The public XPI does not match updates.json"
+            exit 1
+          fi
