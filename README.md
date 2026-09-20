@@ -89,7 +89,9 @@ After `mise run dev:firefox`, the browser opens at `about:debugging#/runtime/thi
 
 ### Install from a release
 
-Pushing a `v*.*.*` tag (matching `manifest.json`'s `version`) triggers the [Release workflow](.github/workflows/release.yml), which publishes to GitHub Releases:
+After merging a version bump, update local `main` and run `mise run release`. The task requires a clean `main` exactly matching `origin/main`, validates that `manifest.json` contains a new `x.y.z` version, runs the quality gates, creates and pushes the annotated version tag, opens the resulting [Release workflow](.github/workflows/release.yml), and watches it to completion. Approve the protected `release` environment in GitHub when prompted; that approval intentionally remains manual.
+
+The workflow publishes these GitHub Release assets:
 
 - `tab-hister-bridge-<version>.xpi` — signed as an **unlisted** AMO add-on (requires the `AMO_API_KEY`/`AMO_API_SECRET` `release` environment secrets from the [AMO Developer Hub](https://addons.mozilla.org/developers/)). Opens and installs **permanently** in Firefox Desktop 142+.
 - `tab-hister-bridge-<version>.zip` — unsigned build; loads only as a temporary add-on via `about:debugging` → **Load Temporary Add-on** (discarded on restart).
@@ -137,6 +139,7 @@ The signing job is gated by the protected `release` environment and requires app
 | `mise run ci`               | `verify`, audits, and build, all on the host                                                      |
 | `mise run ci:dagger`        | The same checks in a locked Dagger container                                                      |
 | `mise run ci:package`       | Build `web-ext-artifacts/tab-hister-bridge.zip` through Dagger                                    |
+| `mise run release`          | Validate, tag, push, and watch a protected release of the manifest version                        |
 | `mise run actions:lint`     | Lint workflows with [actionlint](https://github.com/rhysd/actionlint)                             |
 | `mise run actions:audit`    | Audit workflows with [zizmor](https://github.com/zizmorcore/zizmor), pedantic and without ignores |
 | `mise run audit:prod`       | Check production dependencies for known vulnerabilities                                           |
