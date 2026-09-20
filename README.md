@@ -3,7 +3,7 @@
 Sidecar bridge connecting Firefox [Tab Stash](https://github.com/josh-berry/tab-stash) with the [Hister](https://github.com/asciimoo/hister) archival search engine. Stashed tabs are archived in Hister with [Defuddle](https://github.com/kepano/defuddle)-extracted text and HTML, and items tagged for mobile are pulled back into Tab Stash. The repository and pnpm package are named `tab-hister-bridge`.
 
 > [!NOTE]
-> Tested with [Node.js](https://nodejs.org/) 26, [pnpm](https://pnpm.io/) 12, Defuddle 0.19.4, [web-ext](https://github.com/mozilla/web-ext) 10.6.0, and [Dagger](https://dagger.io/) 0.21.9, on macOS and on Ubuntu GitHub runners.
+> Fully vibe coded slop with only high level supervision and QA, made to explore the Hister API, Tab Stash, Firefox AMO publishing, and satisfy my own needs. Provided as-is, not for production, expect breaking changes yadda yadda.
 
 ## What it does
 
@@ -41,7 +41,7 @@ When enabled, a background alarm polls Hister for `label:<prefix>:mobile` every 
 
 - [mise](https://mise.jdx.dev/) installs Node.js and pnpm from `mise.toml` and `mise.lock`.
 - [Docker](https://www.docker.com/) runs the local Hister daemon.
-- [Firefox](https://www.mozilla.org/firefox/) 115+ or [Zen](https://zen-browser.app/) loads the extension.
+- [Firefox Desktop](https://www.mozilla.org/firefox/) 142+ or a compatible [Zen](https://zen-browser.app/) release loads the extension.
 - [Dagger](https://dagger.io/) is required only for `mise run ci:dagger`.
 - A Tab Stash checkout for `tabstash:install` and `tabstash:build`. It defaults to `../tab-stash`; override with the `TABSTASH_DIR` environment variable.
 
@@ -86,6 +86,19 @@ To launch Firefox with the bridge: mise run dev:firefox
 ```
 
 After `mise run dev:firefox`, the browser opens at `about:debugging#/runtime/this-firefox` with the bridge loaded, `dev-profile` keeps Tab Stash and its data across runs, and `http://127.0.0.1:4433` serves the Hister dashboard.
+
+### Install from a release
+
+Pushing a `v*.*.*` tag (matching `manifest.json`'s `version`) triggers the [Release workflow](.github/workflows/release.yml), which publishes to GitHub Releases:
+
+- `tab-hister-bridge-<version>.xpi` — signed as an **unlisted** AMO add-on (requires the `AMO_API_KEY`/`AMO_API_SECRET` `release` environment secrets from the [AMO Developer Hub](https://addons.mozilla.org/developers/)). Opens and installs **permanently** in Firefox Desktop 142+.
+- `tab-hister-bridge-<version>.zip` — unsigned build; loads only as a temporary add-on via `about:debugging` → **Load Temporary Add-on** (discarded on restart).
+- `updates.json` — Firefox update manifest (only on signed releases); `manifest.json` points `browser_specific_settings.gecko.update_url` at the `releases/latest/download/updates.json` redirect, so Firefox picks up new versions **automatically** (daily update check) once a release with `update_url` in its manifest is installed.
+- `SHA256SUMS.txt` — checksums for the artifacts.
+
+The signing job is gated by the protected `release` environment and requires approval before it can access AMO credentials. Configure the credentials as environment secrets with `gh secret set --env release AMO_API_KEY` and `gh secret set --env release AMO_API_SECRET`. Production tag releases fail when signing is unavailable; manual dispatches remain the unsigned packaging path.
+
+**AMO version immutability:** Mozilla's signing API refuses to sign the same add-on ID + version twice. A bad release cannot be re-signed under the same tag — bump `manifest.json`'s `version` and cut a new tag (`v0.1.0` → `v0.1.1`). Re-pushing an existing tag re-uploads assets to GitHub but the signing step will fail against AMO.
 
 ## Tasks
 
@@ -158,11 +171,13 @@ The CLI reads the same configuration from environment variables:
 
 ```text
 .
-├── manifest.json          # MV3 WebExtension manifest (Firefox 115+)
+├── manifest.json          # MV3 WebExtension manifest (Firefox Desktop 142+)
 ├── mise.toml              # Toolchain pins and task definitions
 ├── mise.lock              # Locked tool versions and checksums
 ├── package.json           # pnpm scripts (build, test, lint, format, backfill)
 ├── LICENSE                # MIT license
+├── PRIVACY.md             # User-data handling policy
+├── AMO_SOURCE_README.md   # Reproducible build instructions for AMO reviewers
 ├── src/                   # Background logic, options UI, Hister client, extractor
 ├── scripts/               # places.sqlite backfill CLI and SQLite snapshot helper
 ├── tests/                 # Vitest unit tests (happy-dom)
@@ -181,6 +196,8 @@ GitHub Actions runs three jobs on pull requests and pushes to `main`:
 
 The audits run with `pnpm audit --ignore-registry-errors`. Vulnerability findings fail the pipeline; npm registry outages do not.
 
+A separate [Release workflow](.github/workflows/release.yml) runs on `v*.*.*` tags (and manually via `workflow_dispatch`): it re-runs the Dagger checks, verifies the tag matches `manifest.json`'s `version` and belongs to `main`, builds the zip, submits reviewer source code and signs an unlisted `.xpi` after approval from the protected `release` environment, validates every asset in a draft release, publishes it, and smoke-tests the public update channel. Packaging, signing, and publishing run in separate least-privilege jobs, so AMO credentials never share a job with GitHub release write access. Manual dispatches intentionally skip AMO signing and upload the unsigned build artifacts to the run instead of creating a release, so they do not consume an immutable AMO version. Note that Mozilla does not allow re-signing the same version: every release needs a fresh `manifest.json` version bump.
+
 ## Configuration
 
 The options page (`about:addons` → **Tab Stash - Hister Bridge** → **Preferences**) holds:
@@ -196,8 +213,9 @@ The toolbar popup opens this same page.
 
 ## Notes and caveats
 
-- `web-ext lint` reports two warnings that CI does not treat as failures: an `innerHTML` assignment inside the bundled Defuddle code, and the missing `data_collection_permissions` manifest key required by newer AMO submissions.
+- `web-ext lint` (run with `--self-hosted`, since the extension declares a custom `gecko.update_url` for GitHub Releases distribution) reports warnings CI does not treat as failures: `UNSAFE_VAR_ASSIGNMENT` findings inside the bundled Defuddle code. `strict_min_version` is `142.0` because `data_collection_permissions` requires Firefox 140+ on desktop and 142+ on Android; Firefox for Android is not enabled.
 - The host extension carries `tabs`, `scripting`, and broad `http(s)` host permissions, which are needed to read rendered pages and fetch stashed URLs.
+- Data handling is documented in the [privacy policy](PRIVACY.md).
 - The mobile poll replaces the original `stash:mobile` label with `stash:synced` when the URL is imported.
 
 ## License
