@@ -1,0 +1,60 @@
+# Dependabot version updates configuration.
+#
+# The 7-day cooldown mirrors the `minimum_release_age = "7d"` supply-chain
+# policy mise already enforces for tool installs: releases are only proposed
+# once they have been on the registry for a week. The cooldown does not delay
+# Dependabot security updates, which must be enabled separately in the
+# repository's Code security settings.
+# Docs: https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
+version: 2
+
+updates:
+  # Root pnpm workspace: extension runtime + dev dependencies.
+  - package-ecosystem: npm_and_yarn
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(dev-deps)"
+    groups:
+      # Non-major dev updates ride together in one PR; majors (and the
+      # single runtime dependency, defuddle) stay separate for review.
+      dev-dependencies:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+    open-pull-requests-limit: 10
+
+  # Dagger CI module ships its own package.json under ci/.
+  - package-ecosystem: npm_and_yarn
+    directory: /ci
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "ci(deps)"
+    groups:
+      dagger-module:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
+
+  # Workflow actions are pinned by commit SHA (zizmor hardening); Dependabot
+  # keeps those pins fresh by moving them to the latest release SHA.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "ci(actions)"
+    open-pull-requests-limit: 10
