@@ -142,6 +142,7 @@ export class Ci {
         "bash",
         "ca-certificates",
         "curl",
+        "git",
         "libatomic1",
         "libsqlite3-0",
         "zip",

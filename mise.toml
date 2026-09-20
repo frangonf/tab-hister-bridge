@@ -205,6 +205,10 @@ run = "mise exec -- dagger call -m ci check --source=."
 description = "Build the extension zip with web-ext inside Dagger"
 run = "mise exec -- dagger call -m ci package --source=. export --path=web-ext-artifacts/tab-hister-bridge.zip"
 
+[tasks.release]
+description = "Verify and publish the manifest version through the protected release workflow"
+run = "pnpm exec tsx scripts/release.ts"
+
 [tasks."actions:lint"]
 description = "Lint GitHub Actions workflows"
 run = "actionlint .github/workflows/*.yml"
