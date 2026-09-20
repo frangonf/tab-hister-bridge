@@ -89,7 +89,7 @@ After `mise run dev:firefox`, the browser opens at `about:debugging#/runtime/thi
 
 ### Install from a release
 
-After merging a version bump, update local `main` and run `mise run release`. The task requires a clean `main` exactly matching `origin/main`, validates that `manifest.json` contains a new `x.y.z` version, runs the quality gates, creates and pushes the annotated version tag, opens the resulting [Release workflow](.github/workflows/release.yml), and watches it to completion. Approve the protected `release` environment in GitHub when prompted; that approval intentionally remains manual.
+After merging a version bump, update local `main` and run `mise run release patch`, `mise run release minor`, or `mise run release major`. The task requires a clean `main` exactly matching `origin/main`, validates that `manifest.json` and `package.json` contain the requested semantic increment from the latest release, runs the quality gates, creates and pushes the annotated version tag, opens the resulting [Release workflow](.github/workflows/release.yml), and watches it to completion. Approve the protected `release` environment in GitHub when prompted; that approval intentionally remains manual.
 
 The workflow publishes these GitHub Release assets:
 
@@ -139,7 +139,7 @@ The signing job is gated by the protected `release` environment and requires app
 | `mise run ci`               | `verify`, audits, and build, all on the host                                                      |
 | `mise run ci:dagger`        | The same checks in a locked Dagger container                                                      |
 | `mise run ci:package`       | Build `web-ext-artifacts/tab-hister-bridge.zip` through Dagger                                    |
-| `mise run release`          | Validate, tag, push, and watch a protected release of the manifest version                        |
+| `mise run release <bump>`   | Validate `patch`, `minor`, or `major`; then tag, push, and watch the protected release            |
 | `mise run actions:lint`     | Lint workflows with [actionlint](https://github.com/rhysd/actionlint)                             |
 | `mise run actions:audit`    | Audit workflows with [zizmor](https://github.com/zizmorcore/zizmor), pedantic and without ignores |
 | `mise run audit:prod`       | Check production dependencies for known vulnerabilities                                           |

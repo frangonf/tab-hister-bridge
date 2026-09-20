@@ -26,7 +26,10 @@ function writeExecutable(path: string, contents: string): void {
   chmodSync(path, 0o755);
 }
 
-function createReleaseRepository(): {
+function createReleaseRepository(
+  version = "0.1.1",
+  previousVersion = "0.1.0",
+): {
   commandLog: string;
   fakeBin: string;
   remote: string;
@@ -44,14 +47,13 @@ function createReleaseRepository(): {
   git(root, "init", "--initial-branch=main", worktree);
   git(worktree, "config", "user.name", "Release Test");
   git(worktree, "config", "user.email", "release@example.com");
-  writeFileSync(
-    join(worktree, "manifest.json"),
-    JSON.stringify({ version: "0.1.0" }),
-  );
-  git(worktree, "add", "manifest.json");
+  writeFileSync(join(worktree, "manifest.json"), JSON.stringify({ version }));
+  writeFileSync(join(worktree, "package.json"), JSON.stringify({ version }));
+  git(worktree, "add", "manifest.json", "package.json");
   git(worktree, "commit", "-m", "initial");
+  git(worktree, "tag", `v${previousVersion}`);
   git(worktree, "remote", "add", "origin", remote);
-  git(worktree, "push", "--set-upstream", "origin", "main");
+  git(worktree, "push", "--set-upstream", "origin", "main", "--tags");
 
   writeExecutable(
     join(fakeBin, "mise"),
@@ -85,29 +87,40 @@ fi
 function runRelease(
   repository: ReturnType<typeof createReleaseRepository>,
   env: NodeJS.ProcessEnv = {},
+  bump: string | null = "patch",
 ) {
-  return spawnSync(tsx, [releaseScript], {
-    cwd: repository.worktree,
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      FAKE_COMMAND_LOG: repository.commandLog,
-      FAKE_HEAD: git(repository.worktree, "rev-parse", "HEAD"),
-      FAKE_RUN_STATE: `${repository.commandLog}.run-state`,
-      PATH: `${repository.fakeBin}:${process.env.PATH}`,
-      ...env,
+  return spawnSync(
+    tsx,
+    bump === null ? [releaseScript] : [releaseScript, bump],
+    {
+      cwd: repository.worktree,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        FAKE_COMMAND_LOG: repository.commandLog,
+        FAKE_HEAD: git(repository.worktree, "rev-parse", "HEAD"),
+        FAKE_RUN_STATE: `${repository.commandLog}.run-state`,
+        PATH: `${repository.fakeBin}:${process.env.PATH}`,
+        ...env,
+      },
     },
-  });
+  );
 }
 
 describe("release script", () => {
-  test("verifies, tags, pushes, and watches the manifest version", () => {
+  test("verifies a patch bump, tags, pushes, and watches the workflow", () => {
     const repository = createReleaseRepository();
     const result = runRelease(repository);
 
     expect(result.status, result.stderr).toBe(0);
-    expect(git(repository.worktree, "tag", "--list")).toBe("v0.1.0");
-    expect(git(repository.remote, "tag", "--list")).toBe("v0.1.0");
+    expect(git(repository.worktree, "tag", "--list").split("\n")).toEqual([
+      "v0.1.0",
+      "v0.1.1",
+    ]);
+    expect(git(repository.remote, "tag", "--list").split("\n")).toEqual([
+      "v0.1.0",
+      "v0.1.1",
+    ]);
     expect(readFileSync(repository.commandLog, "utf8")).toContain(
       "mise run verify",
     );
@@ -119,6 +132,69 @@ describe("release script", () => {
     );
   });
 
+  test.each([
+    ["minor", "0.2.0"],
+    ["major", "1.0.0"],
+  ])("accepts a %s bump to %s", (bump, version) => {
+    const repository = createReleaseRepository(version);
+
+    const result = runRelease(repository, {}, bump);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(git(repository.remote, "tag", "--list")).toContain(`v${version}`);
+  });
+
+  test("requires an explicit bump type", () => {
+    const repository = createReleaseRepository();
+
+    const result = runRelease(repository, {}, null);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Bump type must be patch, minor, or major");
+    expect(git(repository.worktree, "tag", "--list")).toBe("v0.1.0");
+  });
+
+  test("refuses an unsupported bump type", () => {
+    const repository = createReleaseRepository();
+
+    const result = runRelease(repository, {}, "next");
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Bump type must be patch, minor, or major");
+    expect(git(repository.worktree, "tag", "--list")).toBe("v0.1.0");
+  });
+
+  test("refuses a manifest version that does not match the requested bump", () => {
+    const repository = createReleaseRepository();
+
+    const result = runRelease(repository, {}, "minor");
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "A minor release after v0.1.0 must use 0.2.0",
+    );
+    expect(git(repository.worktree, "tag", "--list")).toBe("v0.1.0");
+  });
+
+  test("refuses mismatched manifest and package versions", () => {
+    const repository = createReleaseRepository();
+    writeFileSync(
+      join(repository.worktree, "package.json"),
+      JSON.stringify({ version: "0.1.2" }),
+    );
+    git(repository.worktree, "add", "package.json");
+    git(repository.worktree, "commit", "-m", "mismatched package version");
+    git(repository.worktree, "push", "origin", "main");
+
+    const result = runRelease(repository);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "package.json version must match manifest.json",
+    );
+    expect(git(repository.worktree, "tag", "--list")).toBe("v0.1.0");
+  });
+
   test("refuses to release from a branch other than main", () => {
     const repository = createReleaseRepository();
     git(repository.worktree, "switch", "-c", "feature");
@@ -127,7 +203,7 @@ describe("release script", () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("Releases must run from the main branch");
-    expect(git(repository.worktree, "tag", "--list")).toBe("");
+    expect(git(repository.worktree, "tag", "--list")).toBe("v0.1.0");
     expect(readFileSync(repository.commandLog, "utf8")).not.toContain("mise");
   });
 
@@ -139,7 +215,7 @@ describe("release script", () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("working tree must be clean");
-    expect(git(repository.worktree, "tag", "--list")).toBe("");
+    expect(git(repository.worktree, "tag", "--list")).toBe("v0.1.0");
   });
 
   test("refuses to release when main does not match origin/main", () => {
@@ -152,7 +228,7 @@ describe("release script", () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("main must exactly match origin/main");
-    expect(git(repository.worktree, "tag", "--list")).toBe("");
+    expect(git(repository.worktree, "tag", "--list")).toBe("v0.1.0");
   });
 
   test("refuses an invalid manifest version", () => {
@@ -169,31 +245,31 @@ describe("release script", () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("manifest version must use x.y.z format");
-    expect(git(repository.worktree, "tag", "--list")).toBe("");
+    expect(git(repository.worktree, "tag", "--list")).toBe("v0.1.0");
   });
 
   test("refuses to reuse a local release tag", () => {
     const repository = createReleaseRepository();
-    git(repository.worktree, "tag", "v0.1.0");
+    git(repository.worktree, "tag", "v0.1.1");
 
     const result = runRelease(repository);
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("Release tag v0.1.0 already exists");
+    expect(result.stderr).toContain("Release tag v0.1.1 already exists");
     expect(readFileSync(repository.commandLog, "utf8")).not.toContain("mise");
   });
 
   test("refuses to reuse a remote release tag", () => {
     const repository = createReleaseRepository();
-    git(repository.worktree, "tag", "v0.1.0");
-    git(repository.worktree, "push", "origin", "v0.1.0");
-    git(repository.worktree, "tag", "--delete", "v0.1.0");
+    git(repository.worktree, "tag", "v0.1.1");
+    git(repository.worktree, "push", "origin", "v0.1.1");
+    git(repository.worktree, "tag", "--delete", "v0.1.1");
 
     const result = runRelease(repository);
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(
-      "Release tag v0.1.0 already exists on origin",
+      "Release tag v0.1.1 already exists on origin",
     );
     expect(readFileSync(repository.commandLog, "utf8")).not.toContain("mise");
   });
@@ -217,7 +293,7 @@ describe("release script", () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("GitHub CLI authentication is required");
-    expect(git(repository.worktree, "tag", "--list")).toBe("");
+    expect(git(repository.worktree, "tag", "--list")).toBe("v0.1.0");
     expect(readFileSync(repository.commandLog, "utf8")).not.toContain("mise");
   });
 });
