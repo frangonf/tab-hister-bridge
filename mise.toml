@@ -206,8 +206,14 @@ description = "Build the extension zip with web-ext inside Dagger"
 run = "mise exec -- dagger call -m ci package --source=. export --path=web-ext-artifacts/tab-hister-bridge.zip"
 
 [tasks.release]
-description = "Verify and publish the manifest version through the protected release workflow"
-run = "pnpm exec tsx scripts/release.ts"
+description = "Verify and publish a semantic version bump through the protected release workflow"
+usage = '''
+arg "<bump>" {
+  help "Semantic version component to increment from the latest release"
+  choices "patch" "minor" "major"
+}
+'''
+run = "pnpm exec tsx scripts/release.ts ${usage_bump?}"
 
 [tasks."actions:lint"]
 description = "Lint GitHub Actions workflows"

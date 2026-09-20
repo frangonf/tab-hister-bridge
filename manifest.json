@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Tab Stash - Hister Bridge",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Bridges Firefox Tab Stash with the Hister search & archival engine",
   "browser_specific_settings": {
     "gecko": {

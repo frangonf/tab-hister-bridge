@@ -7,6 +7,40 @@ interface WorkflowRun {
   url: string;
 }
 
+type BumpType = "patch" | "minor" | "major";
+type Version = [major: number, minor: number, patch: number];
+
+const VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+
+function parseVersion(value: unknown): Version | undefined {
+  if (typeof value !== "string") return undefined;
+  const match = VERSION_PATTERN.exec(value);
+  if (!match) return undefined;
+  const version = match.slice(1).map(Number) as Version;
+  return version.every(Number.isSafeInteger) ? version : undefined;
+}
+
+function formatVersion([major, minor, patch]: Version): string {
+  return `${major}.${minor}.${patch}`;
+}
+
+function compareVersions(left: Version, right: Version): number {
+  for (let index = 0; index < left.length; index += 1) {
+    const difference = left[index] - right[index];
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
+function incrementVersion(
+  [major, minor, patch]: Version,
+  bump: BumpType,
+): Version {
+  if (bump === "major") return [major + 1, 0, 0];
+  if (bump === "minor") return [major, minor + 1, 0];
+  return [major, minor, patch + 1];
+}
+
 function run(
   command: string,
   args: string[],
@@ -28,6 +62,15 @@ function commandStatus(command: string, args: string[]): number | null {
 }
 
 function main(): void {
+  const args = process.argv.slice(2);
+  const bump = args[0];
+  if (
+    args.length !== 1 ||
+    (bump !== "patch" && bump !== "minor" && bump !== "major")
+  ) {
+    throw new Error("Bump type must be patch, minor, or major");
+  }
+
   const branch = run("git", ["branch", "--show-current"], { capture: true });
   if (branch !== "main") {
     throw new Error("Releases must run from the main branch");
@@ -55,13 +98,19 @@ function main(): void {
   const manifest = JSON.parse(readFileSync("manifest.json", "utf8")) as {
     version?: unknown;
   };
-  if (
-    typeof manifest.version !== "string" ||
-    !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(manifest.version)
-  ) {
+  const version = parseVersion(manifest.version);
+  if (!version) {
     throw new Error("The manifest version must use x.y.z format");
   }
-  const tag = `v${manifest.version}`;
+  const versionName = formatVersion(version);
+  const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
+    version?: unknown;
+  };
+  if (packageJson.version !== versionName) {
+    throw new Error("package.json version must match manifest.json");
+  }
+
+  const tag = `v${versionName}`;
   if (
     commandStatus("git", [
       "show-ref",
@@ -72,19 +121,34 @@ function main(): void {
   ) {
     throw new Error(`Release tag ${tag} already exists locally`);
   }
-  const remoteTagStatus = commandStatus("git", [
-    "ls-remote",
-    "--exit-code",
-    "--tags",
-    "origin",
-    `refs/tags/${tag}`,
-  ]);
-  if (remoteTagStatus === 0) {
+  const remoteTags = run(
+    "git",
+    ["ls-remote", "--tags", "origin", "refs/tags/v*"],
+    { capture: true },
+  );
+  const releasedVersions = new Map<string, Version>();
+  for (const line of remoteTags.split("\n")) {
+    const ref = line.trim().split(/\s+/)[1];
+    const match = /^refs\/tags\/v([^^]+)(?:\^\{\})?$/.exec(ref ?? "");
+    const releasedVersion = parseVersion(match?.[1]);
+    if (releasedVersion) {
+      releasedVersions.set(formatVersion(releasedVersion), releasedVersion);
+    }
+  }
+  if (releasedVersions.has(versionName)) {
     throw new Error(`Release tag ${tag} already exists on origin`);
   }
-  if (remoteTagStatus !== 2) {
-    throw new Error(`Could not check release tag ${tag} on origin`);
+
+  const previousVersion = [...releasedVersions.values()]
+    .sort(compareVersions)
+    .at(-1) ?? [0, 0, 0];
+  const expectedVersion = incrementVersion(previousVersion, bump);
+  if (compareVersions(version, expectedVersion) !== 0) {
+    throw new Error(
+      `A ${bump} release after v${formatVersion(previousVersion)} must use ${formatVersion(expectedVersion)}, but manifest.json uses ${versionName}`,
+    );
   }
+
   if (commandStatus("gh", ["auth", "status"]) !== 0) {
     throw new Error(
       "GitHub CLI authentication is required; run `gh auth login`",
